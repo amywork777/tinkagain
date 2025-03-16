@@ -321,8 +321,6 @@ const Print3DTab = () => {
             basePrice = 2 + ((volumeCubicCm - 5) / 45) * 3; // $2-$5
           } else if (volumeCubicCm < 200) {
             basePrice = 5 + ((volumeCubicCm - 50) / 150) * 5; // $5-$10
-          } else if (volumeCubicCm < 1000) {
-            basePrice = 10 + ((volumeCubicCm - 200) / 800) * 20; // $10-$30
       } else {
             // For extremely large models, continue scaling (approximately $15 per 1000 cubic cm)
             basePrice = 100 + ((volumeCubicCm - 5000) / 1000) * 15;
@@ -1169,7 +1167,7 @@ const Print3DTab = () => {
     <div className="space-y-5">
       {/* Model selection section */}
       <div className="bg-card rounded-md border p-4">
-        <h2 className="text-lg font-medium mb-3">Model</h2>
+        <h2 className="text-lg font-medium mb-3 text-gray-900">Model</h2>
         
         <div className="space-y-4">
           {/* Model Dropdown */}
@@ -1189,7 +1187,7 @@ const Print3DTab = () => {
               </SelectTrigger>
               <SelectContent>
                 <SelectGroup>
-                  <SelectLabel>From 3D Viewer</SelectLabel>
+                  <SelectLabel className="font-medium text-gray-800">From 3D Viewer</SelectLabel>
                   {models.length > 0 ? (
                     models.map((model, index) => (
                       <SelectItem key={index} value={index.toString()}>
@@ -1214,7 +1212,7 @@ const Print3DTab = () => {
             {selectedModelIndex !== null ? (
               <Card className="bg-muted/50">
                 <CardContent className="p-3">
-                  <div className="text-sm">
+                  <div className="text-sm text-gray-800">
                     <span className="font-medium">Selected:</span>{" "}
                     {models[selectedModelIndex]?.name || `Model ${selectedModelIndex + 1}`}
                   </div>
@@ -1223,7 +1221,7 @@ const Print3DTab = () => {
             ) : uploadedModelData ? (
               <Card className="bg-muted/50">
                 <CardContent className="p-3">
-                  <div className="text-sm">
+                  <div className="text-sm text-gray-800">
                     <span className="font-medium">Uploaded:</span>{" "}
                     Custom Model
                   </div>
@@ -1241,7 +1239,7 @@ const Print3DTab = () => {
           </div>
           
           {error && (
-            <div className="text-sm text-red-500 flex items-center gap-1.5">
+            <div className="text-sm text-red-600 flex items-center gap-1.5">
               <AlertCircle className="h-4 w-4" />
               {error}
             </div>
@@ -1251,11 +1249,11 @@ const Print3DTab = () => {
           
       {/* Filament selection section */}
       <div className="bg-card rounded-md border p-4">
-        <h2 className="text-lg font-medium mb-3">Material & Quantity</h2>
+        <h2 className="text-lg font-medium mb-3 text-gray-900">Material & Quantity</h2>
         
         <div className="space-y-4">
           <div>
-            <Label htmlFor="filament-select" className="mb-2 block">PLA Color</Label>
+            <Label htmlFor="filament-select" className="mb-2 block text-gray-800">PLA Color</Label>
             <Select
               value={selectedFilament}
               onValueChange={setSelectedFilament}
@@ -1275,7 +1273,7 @@ const Print3DTab = () => {
           
           {/* Quantity selector */}
           <div>
-            <Label htmlFor="quantity">Quantity</Label>
+            <Label htmlFor="quantity" className="text-gray-800">Quantity</Label>
             <Input
               id="quantity"
               type="number"

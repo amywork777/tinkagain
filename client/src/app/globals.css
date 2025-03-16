@@ -31,4 +31,27 @@
 .slider-green .slider-thumb:hover,
 .slider-blue .slider-thumb:hover {
   opacity: 0.8;
+}
+
+/* Improved text contrast */
+.text-muted-foreground {
+  color: rgb(75, 85, 99) !important; /* Darker gray for better contrast */
+}
+
+[data-theme="dark"] .text-muted-foreground {
+  color: rgb(156, 163, 175) !important; /* Lighter gray for dark mode */
+}
+
+/* Card background and text contrast improvements */
+.bg-card {
+  background-color: rgb(255, 255, 255);
+}
+
+.card {
+  background-color: rgb(255, 255, 255);
+}
+
+/* Ensure text has good contrast against white */
+.card, .bg-card {
+  color: rgb(31, 41, 55);
 } 
