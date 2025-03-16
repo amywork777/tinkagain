@@ -153,65 +153,6 @@ export default function Home() {
             fileName={pendingImport.fileName}
           />
         )}
-        
-        {/* Header bar */}
-        <div className="w-full h-12 bg-background border-b border-border flex items-center justify-between px-4">
-          <div className="flex items-center">
-            <a href="https://taiyaki.ai" target="_blank" rel="noopener noreferrer">
-              <FishLogo 
-                width={32} 
-                height={32} 
-                className="mr-2 text-[hsl(186,85%,73%)]" 
-              />
-            </a>
-            <h1 className="text-xl font-bold text-primary">taiyaki.ai</h1>
-            <div className="ml-3">
-              <ThemeToggle />
-            </div>
-          </div>
-          <div className="flex items-center space-x-2">
-            <FeedbackDialog />
-            
-            {/* User Avatar or Login Button */}
-            {isAuthenticated ? (
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" size="icon" className="rounded-full">
-                    <Avatar className="h-8 w-8">
-                      <AvatarImage src={user?.profilePicture || undefined} />
-                      <AvatarFallback>{user?.displayName?.[0] || user?.email?.[0] || "U"}</AvatarFallback>
-                    </Avatar>
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuLabel className="font-normal">
-                    <div className="flex flex-col space-y-1">
-                      <p className="text-sm font-medium leading-none">{user?.displayName || 'User'}</p>
-                      <p className="text-xs leading-none text-muted-foreground">{user?.email || ''}</p>
-                    </div>
-                  </DropdownMenuLabel>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem onClick={logout}>
-                    <LogOut className="h-4 w-4 mr-2" />
-                    Log out
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            ) : (
-              <Button 
-                variant="ghost" 
-                size="sm"
-                onClick={login}
-                className="ml-auto"
-              >
-                <User className="h-4 w-4 mr-1" />
-                <span>Log in</span>
-              </Button>
-            )}
-            
-            <ThemeToggle />
-          </div>
-        </div>
 
         {/* Main content area */}
         <main className="flex flex-1 w-full overflow-hidden relative">
