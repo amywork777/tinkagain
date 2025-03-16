@@ -53,24 +53,29 @@ const getApiUrl = (): string => {
 const API_URL = getApiUrl();
 console.log(`API URL configured as: ${API_URL}`);
 
-// PRODUCTION STRIPE KEYS
-const STRIPE_PROD_KEYS = {
-  PUBLISHABLE_KEY: 'pk_live_51QIaT9CLoBz9jXRlVEQ99Q6V4UiRSYy8ZS49MelsW8EfX1mEijh3K5JQEe5iysIL31cGtf2IsTVIyV1mivoUHCUI00aPpz3GMi',
-  MONTHLY_PRICE: 'price_1R1jGiCLoBz9jXRlB1uLgvE9', // Pro Monthly
+// STRIPE KEYS - Using test keys for safe development testing
+const STRIPE_KEYS_CONFIG = {
+  // Test keys
+  PUBLISHABLE_KEY: 'pk_test_51QIaT9CLoBz9jXRlIIzh4kSW2I0D1Fdc4UtnkCIfVgEJDbWgakBfjj5vJaklb3oQd1PA9QVct10x2yTvmlTjQ4X000lDb0TWML',
+  MONTHLY_PRICE: 'price_1R1LlMCLoBz9jXRl3OQ5Q6kE', // Pro Monthly - test price
+  
+  // Production keys - commented out for safety
+  // PUBLISHABLE_KEY: 'pk_live_51QIaT9CLoBz9jXRlVEQ99Q6V4UiRSYy8ZS49MelsW8EfX1mEijh3K5JQEe5iysIL31cGtf2IsTVIyV1mivoUHCUI00aPpz3GMi',
+  // MONTHLY_PRICE: 'price_1R1jGiCLoBz9jXRlB1uLgvE9', // Pro Monthly - production
 };
 
 // Export the publishable key directly
-export const PUBLISHABLE_KEY = STRIPE_PROD_KEYS.PUBLISHABLE_KEY;
+export const PUBLISHABLE_KEY = STRIPE_KEYS_CONFIG.PUBLISHABLE_KEY;
 
 // Export STRIPE_KEYS for backward compatibility with existing components
 export const STRIPE_KEYS = {
-  PUBLISHABLE_KEY: STRIPE_PROD_KEYS.PUBLISHABLE_KEY,
-  MONTHLY_PRICE: STRIPE_PROD_KEYS.MONTHLY_PRICE,
+  PUBLISHABLE_KEY: STRIPE_KEYS_CONFIG.PUBLISHABLE_KEY,
+  MONTHLY_PRICE: STRIPE_KEYS_CONFIG.MONTHLY_PRICE,
 };
 
 // Export STRIPE_PRICES directly for consistent access
 export const STRIPE_PRICES = {
-  MONTHLY: STRIPE_PROD_KEYS.MONTHLY_PRICE,
+  MONTHLY: STRIPE_KEYS_CONFIG.MONTHLY_PRICE,
 };
 
 // Helper to add cache-busting parameter
@@ -146,7 +151,7 @@ export const createCheckoutSession = async (
     };
     
     // Add required fields
-    addField('api_key', STRIPE_PROD_KEYS.PUBLISHABLE_KEY);
+    addField('api_key', STRIPE_KEYS_CONFIG.PUBLISHABLE_KEY);
     addField('price_id', priceId);
     addField('success_url', `${window.location.origin}/pricing/success?session_id={CHECKOUT_SESSION_ID}`);
     addField('cancel_url', `${window.location.origin}/pricing`);
@@ -1049,7 +1054,7 @@ export const createDirectStripeCheckout = async (
   try {
     // Load Stripe
     const StripeConstructor = await loadStripe();
-    const stripe = StripeConstructor(STRIPE_PROD_KEYS.PUBLISHABLE_KEY);
+    const stripe = StripeConstructor(STRIPE_KEYS_CONFIG.PUBLISHABLE_KEY);
     
     console.log('Stripe loaded successfully, redirecting to checkout...');
     
@@ -1096,7 +1101,7 @@ export const createDirectStripeCheckout = async (
       params.append('line_items[0][quantity]', '1');
       
       // Add API key
-      params.append('key', STRIPE_PROD_KEYS.PUBLISHABLE_KEY);
+      params.append('key', STRIPE_KEYS_CONFIG.PUBLISHABLE_KEY);
       
       // Construct the final URL
       const url = `https://checkout.stripe.com/pay/${params.toString()}`;
@@ -1132,7 +1137,7 @@ const createFormSubmission = (priceId: string, email?: string) => {
   };
   
   // Add required fields
-  addField('key', STRIPE_PROD_KEYS.PUBLISHABLE_KEY);
+  addField('key', STRIPE_KEYS_CONFIG.PUBLISHABLE_KEY);
   addField('line_items[0][price]', priceId);
   addField('line_items[0][quantity]', '1');
   addField('mode', 'subscription');
