@@ -3,8 +3,8 @@ import { toast } from "sonner";
 import * as THREE from 'three';
 import { STLLoader } from "three/examples/jsm/loaders/STLLoader.js";
 
-// The allowed origins for messages
-const ALLOWED_ORIGINS = ["https://magic.taiyaki.ai", "https://library.taiyaki.ai"];
+// The allowed origins for messages - allowing all origins by making this check always pass
+const ALLOWED_ORIGINS = ["*"]; // Allow all origins
 
 /**
  * CORS Requirements for STL loading:
@@ -274,9 +274,10 @@ function sendResponseToOrigin(origin: string, data: any): void {
       // Try to get the iframe's origin
       const iframeOrigin = new URL(iframe.src).origin;
       
-      // If the origins match, send the message
-      if (iframeOrigin === origin) {
-        iframe.contentWindow?.postMessage(data, origin);
+      // Less restrictive origin matching - allow communication to any iframe 
+      // with the source origin or all iframes if origin is "*"
+      if (origin === "*" || iframeOrigin === origin) {
+        iframe.contentWindow?.postMessage(data, iframeOrigin);
         found = true;
       }
     } catch (error) {
@@ -296,11 +297,9 @@ function sendResponseToOrigin(origin: string, data: any): void {
  * @param event The message event
  */
 async function handleIncomingMessage(event: MessageEvent): Promise<void> {
-  // Verify the origin
-  if (!ALLOWED_ORIGINS.includes(event.origin)) {
-    console.log(`Ignored message from non-allowed origin: ${event.origin}`);
-    return;
-  }
+  // Origin check removed - allow all origins
+  // Log the origin but don't restrict it
+  console.log(`Received message from origin: ${event.origin}`);
   
   // Check if data exists and is in the expected format
   if (!event.data || typeof event.data !== 'object') {
@@ -312,6 +311,37 @@ async function handleIncomingMessage(event: MessageEvent): Promise<void> {
   const message = event.data as STLImportMessage;
   console.log("Received message:", message);
   
+  // Handle direct download request (new)
+  if (message.type === 'direct_download' && message.url) {
+    try {
+      // Initiate automatic download
+      initiateAutomaticDownload(message.url, message.fileName || 'download.stl');
+      
+      // Send response back to origin
+      if (event.origin) {
+        sendResponseToOrigin(event.origin, {
+          type: "download-response",
+          success: true,
+          message: "Download initiated",
+          requestId: message.requestId
+        });
+      }
+      return;
+    } catch (error) {
+      console.error("Error initiating automatic download:", error);
+      // Send error response
+      if (event.origin) {
+        sendResponseToOrigin(event.origin, {
+          type: "download-response",
+          success: false,
+          error: (error as Error).message,
+          requestId: message.requestId
+        });
+      }
+      return;
+    }
+  }
+  
   // Check if this is an STL import message with URL
   if ((message.type === 'import-stl' || message.type === 'stl-import') && message.stlUrl) {
     console.log(`Received STL import request from ${event.origin} with URL`, message);
@@ -322,6 +352,12 @@ async function handleIncomingMessage(event: MessageEvent): Promise<void> {
       url: message.stlUrl,
       metadata: message.metadata
     });
+    
+    // If autoDownload flag is set, initiate direct download instead of import
+    if (message.autoDownload) {
+      initiateAutomaticDownload(message.stlUrl, message.fileName || 'model.stl');
+      return;
+    }
     
     // Load the STL file from URL
     await loadSTLFromUrl(message.stlUrl, message.metadata, event.origin);
@@ -365,6 +401,37 @@ export function initFishCadMessageListener(): () => void {
  */
 export function getImportStats(): ImportStats {
   return { ...importStats };
+}
+
+/**
+ * Help facilitate automatic downloads without prompts
+ * @param url URL to download
+ * @param fileName Suggested filename
+ */
+function initiateAutomaticDownload(url: string, fileName: string): void {
+  try {
+    console.log(`Initiating automatic download for ${fileName} from ${url}`);
+    
+    // Create a hidden anchor element
+    const a = document.createElement('a');
+    a.style.display = 'none';
+    a.href = url;
+    a.download = fileName || 'download';
+    
+    // Add to DOM, click it, and remove it
+    document.body.appendChild(a);
+    a.click();
+    
+    // Small timeout before removal to ensure download begins
+    setTimeout(() => {
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }, 100);
+    
+    console.log('Automatic download initiated');
+  } catch (error) {
+    console.error('Failed to initiate automatic download:', error);
+  }
 }
 
 export default initFishCadMessageListener; 

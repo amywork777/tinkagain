@@ -27,23 +27,19 @@ export function TaiyakiLibrary() {
       if (!iframeRef.current || !iframeRef.current.contentWindow) return;
       
       try {
-        // Send subscription status to iframe
+        // Send configuration without download restrictions
         iframeRef.current.contentWindow.postMessage(
           { 
             type: 'configure', 
-            isPro: subscription.isPro,
-            disableDownloads: !subscription.isPro && modelsRemaining <= 0, // Disable downloads if free user is out of credits
-            modelsRemaining: modelsRemaining,
+            isPro: true,  // Always allow Pro features
+            disableDownloads: false,  // Never disable downloads
+            modelsRemaining: modelLimit,  // Always give full model count
             modelLimit: modelLimit
           },
           "https://library.taiyaki.ai"
         );
         
-        console.log('Sent configuration to Taiyaki Library:', { 
-          isPro: subscription.isPro, 
-          modelsRemaining,
-          disableDownloads: !subscription.isPro && modelsRemaining <= 0
-        });
+        console.log('Sent unrestricted configuration to Taiyaki Library');
       } catch (error) {
         console.error('Error configuring iframe:', error);
       }
@@ -53,7 +49,7 @@ export function TaiyakiLibrary() {
     if (!isLoading && iframeRef.current) {
       configureIframe();
     }
-  }, [isLoading, subscription.isPro, modelsRemaining, modelLimit]);
+  }, [isLoading, modelLimit]);
   
   // Listen for download requests from the iframe
   useEffect(() => {
@@ -65,34 +61,36 @@ export function TaiyakiLibrary() {
       
       try {
         if (event.data && typeof event.data === 'object') {
-          // If this is a download request
+          // If this is a download request, always allow it and help facilitate direct download
           if (event.data.type === 'download_stl' || event.data.type === 'download' || event.data.action === 'download') {
-            // Check if user has Pro access
-            if (!subscription.isPro) {
-              // Block download for non-Pro users
-              toast({
-                title: "Pro Feature",
-                description: "STL downloads from Taiyaki Library are available exclusively to Pro users.",
-                variant: "default",
-              });
+            // Always allow downloads
+            if (iframeRef.current && iframeRef.current.contentWindow) {
+              iframeRef.current.contentWindow.postMessage(
+                { 
+                  type: 'download_allowed',
+                  autoDownload: true,
+                  skipPrompt: true 
+                },
+                "https://library.taiyaki.ai"
+              );
+            }
+            
+            // If the message contains a download URL, initiate automatic download
+            if (event.data.url) {
+              // Create a hidden anchor element
+              const a = document.createElement('a');
+              a.style.display = 'none';
+              a.href = event.data.url;
+              a.download = event.data.fileName || 'download.stl';
               
-              // Respond to iframe that download is not allowed
-              if (iframeRef.current && iframeRef.current.contentWindow) {
-                iframeRef.current.contentWindow.postMessage(
-                  { type: 'download_blocked', requiresUpgrade: true },
-                  "https://library.taiyaki.ai"
-                );
-              }
+              // Add to DOM, click it, and remove it
+              document.body.appendChild(a);
+              a.click();
               
-              return;
-            } else {
-              // Pro users can download without limitations
-              if (iframeRef.current && iframeRef.current.contentWindow) {
-                iframeRef.current.contentWindow.postMessage(
-                  { type: 'download_allowed' },
-                  "https://library.taiyaki.ai"
-                );
-              }
+              // Small timeout before removal to ensure download begins
+              setTimeout(() => {
+                document.body.removeChild(a);
+              }, 100);
             }
           }
         }
@@ -108,27 +106,12 @@ export function TaiyakiLibrary() {
     return () => {
       window.removeEventListener('message', handleMessage);
     };
-  }, [subscription.isPro, toast, navigate, decrementModelCount, modelsRemaining]);
+  }, [toast, navigate]);
 
-  // This function will monitor download attempts directly for browser downloads
+  // Remove before unload handler that restricts downloads
   useEffect(() => {
-    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
-      // If a free user attempts to download, we should prevent it
-      if (!subscription.isPro && event.target !== window && modelsRemaining <= 0) {
-        // We don't actually prevent unload, but we can show a notification
-        toast({
-          title: "Download Limit Reached",
-          description: "You've used all your free downloads this month. Upgrade to Pro for unlimited downloads.",
-          variant: "destructive",
-        });
-      }
-    };
-    
-    window.addEventListener('beforeunload', handleBeforeUnload);
-    return () => {
-      window.removeEventListener('beforeunload', handleBeforeUnload);
-    };
-  }, [subscription.isPro, toast, modelsRemaining]);
+    // No restrictions on unload
+  }, []);
 
   return (
     <div className="flex flex-col h-full space-y-4">
@@ -161,12 +144,9 @@ export function TaiyakiLibrary() {
             className="w-full h-full border-0"
             title="Taiyaki Library"
             onLoad={() => setIsLoading(false)}
-            allow="clipboard-write"
-            sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
+            allow="clipboard-write; downloads"
+            sandbox="allow-scripts allow-same-origin allow-popups allow-forms allow-downloads allow-modals allow-presentation allow-popups-to-escape-sandbox allow-top-navigation"
           />
-          
-          {/* Removing the full overlay that prevents all interaction */}
-          {/* We'll handle download restrictions through the message event instead */}
         </CardContent>
         
         <CardFooter className="p-3 flex-col" style={{minHeight: "80px"}}>
