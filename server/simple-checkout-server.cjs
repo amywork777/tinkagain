@@ -1095,68 +1095,132 @@ app.post('/api/create-checkout-session', async (req, res) => {
       }
       
       // Create a Stripe product for this order
-      console.log('Creating Stripe product...');
-      const product = await stripe.products.create({
+      console.log(`[${new Date().toISOString()}] STRIPE PRODUCT CREATION: Starting product creation for 3D print order`);
+      console.log(`[${new Date().toISOString()}] STRIPE PRODUCT DETAILS:`, {
         name: `${modelName} (${color}, Qty: ${quantity})`,
-        description: `3D Print: ${modelName} in ${color}${stlInfo}`,
-      });
-      console.log('Stripe product created:', product.id);
-      
-      // Create a price for the product
-      console.log('Creating Stripe price...');
-      const price = await stripe.prices.create({
-        product: product.id,
-        unit_amount: Math.round(finalPrice * 100), // Convert dollars to cents
-        currency: 'usd',
-      });
-      console.log('Stripe price created:', price.id);
-      
-      // Determine the host for redirect URLs
-      const host = req.headers.origin || `http://${req.headers.host}`;
-      console.log('Using host for redirect:', host);
-      
-      // Create the Stripe checkout session with STL file metadata
-      console.log('Creating Stripe checkout session...');
-      
-      const session = await stripe.checkout.sessions.create({
-        payment_method_types: ['card'],
-        line_items: [
-          {
-            price: price.id,
-            quantity: 1, // We already factored quantity into the price
-          },
-        ],
-        mode: 'payment',
-        success_url: `${host}/checkout-confirmation?session_id={CHECKOUT_SESSION_ID}`,
-        cancel_url: `${host}/`,
+        description: `3D Print: ${modelName} in ${color}`,
         metadata: {
           modelName,
           color,
           quantity: quantity.toString(),
           finalPrice: finalPrice.toString(),
           stlFileName: stlFileName || 'unknown.stl',
-          hasStlDownloadUrl: !!finalStlDownloadUrl,
-          hasStlPublicUrl: !!finalStlPublicUrl,
-          hasStlStoragePath: !!finalStlStoragePath,
-          stlFileSize: stlFileSize.toString(),
-          stlFileUploaded: stlFileUploaded.toString(),
-          orderTempId: stlFileData && !stlFileUploaded ? `temp-${Date.now()}` : '', 
-          stlDataPreview: stlDataString || ''
-        },
-        // Enable billing address collection to get email and address for shipping
-        billing_address_collection: 'required',
-        shipping_address_collection: {
-          allowed_countries: ['US', 'CA', 'GB', 'AU'], // Add the countries you ship to
-        },
+          orderType: '3d_print'
+        }
       });
-      console.log('Stripe checkout session created:', session.id);
+      
+      try {
+        const product = await stripe.products.create({
+          name: `${modelName} (${color}, Qty: ${quantity})`,
+          description: `3D Print: ${modelName} in ${color}${stlInfo}`,
+          metadata: {
+            modelName,
+            color,
+            quantity: quantity.toString(),
+            orderType: '3d_print'
+          }
+        });
+        console.log(`[${new Date().toISOString()}] STRIPE PRODUCT CREATED: ID=${product.id}, Name=${product.name}`);
+        
+        // Create a price for the product
+        console.log(`[${new Date().toISOString()}] STRIPE PRICE CREATION: Creating price for product ${product.id}`);
+        console.log(`[${new Date().toISOString()}] STRIPE PRICE DETAILS:`, {
+          product: product.id,
+          unit_amount: Math.round(finalPrice * 100),
+          currency: 'usd',
+          productName: product.name
+        });
+        
+        const price = await stripe.prices.create({
+          product: product.id,
+          unit_amount: Math.round(finalPrice * 100), // Convert dollars to cents
+          currency: 'usd',
+        });
+        console.log(`[${new Date().toISOString()}] STRIPE PRICE CREATED: ID=${price.id}, Amount=${price.unit_amount/100} USD`);
+        
+        // Determine the host for redirect URLs
+        const host = req.headers.origin || `http://${req.headers.host}`;
+        console.log(`[${new Date().toISOString()}] CHECKOUT HOSTNAME: Using host for redirect: ${host}`);
+        
+        // Create the Stripe checkout session with STL file metadata
+        console.log(`[${new Date().toISOString()}] STRIPE SESSION CREATION: Creating checkout session`);
+        console.log(`[${new Date().toISOString()}] STRIPE SESSION DETAILS:`, {
+          payment_method_types: ['card'],
+          line_items: [{
+            price: price.id,
+            quantity: 1
+          }],
+          mode: 'payment',
+          success_url: `${host}/checkout-confirmation?session_id={CHECKOUT_SESSION_ID}`,
+          cancel_url: `${host}/`,
+          has_shipping_address: true,
+          has_billing_address: true
+        });
+        
+        const session = await stripe.checkout.sessions.create({
+          payment_method_types: ['card'],
+          line_items: [
+            {
+              price: price.id,
+              quantity: 1, // We already factored quantity into the price
+            },
+          ],
+          mode: 'payment',
+          success_url: `${host}/checkout-confirmation?session_id={CHECKOUT_SESSION_ID}`,
+          cancel_url: `${host}/`,
+          metadata: {
+            modelName,
+            color,
+            quantity: quantity.toString(),
+            finalPrice: finalPrice.toString(),
+            stlFileName: stlFileName || 'unknown.stl',
+            hasStlDownloadUrl: !!finalStlDownloadUrl,
+            hasStlPublicUrl: !!finalStlPublicUrl,
+            hasStlStoragePath: !!finalStlStoragePath,
+            stlFileSize: stlFileSize.toString(),
+            stlFileUploaded: stlFileUploaded.toString(),
+            orderTempId: stlFileData && !stlFileUploaded ? `temp-${Date.now()}` : '', 
+            stlDataPreview: stlDataString || ''
+          },
+          // Enable billing address collection to get email and address for shipping
+          billing_address_collection: 'required',
+          shipping_address_collection: {
+            allowed_countries: ['US', 'CA', 'GB', 'AU'], // Add the countries you ship to
+          },
+        });
+        console.log(`[${new Date().toISOString()}] STRIPE SESSION CREATED: ID=${session.id}, URL=${session.url}`);
 
-      // Return the session ID and URL
-      return res.json({
-        success: true,
-        url: session.url,
-        sessionId: session.id
-      });
+        // Return the session ID and URL
+        return res.json({
+          success: true,
+          url: session.url,
+          sessionId: session.id
+        });
+      } catch (stripeError) {
+        console.error(`[${new Date().toISOString()}] STRIPE ERROR:`, stripeError);
+        
+        // Get more details about the error
+        const errorMessage = stripeError.message || 'Unknown Stripe error';
+        const errorType = stripeError.type || 'unknown_type';
+        const errorCode = stripeError.code || 'unknown_code';
+        
+        console.error(`[${new Date().toISOString()}] STRIPE ERROR DETAILS:`, {
+          message: errorMessage,
+          type: errorType,
+          code: errorCode,
+          raw: stripeError
+        });
+        
+        return res.status(500).json({
+          success: false,
+          message: `Stripe error: ${errorMessage}`,
+          error: {
+            type: errorType,
+            code: errorCode,
+            message: errorMessage
+          }
+        });
+      }
     } else {
       // This is a subscription checkout
       console.log('Handling subscription checkout');

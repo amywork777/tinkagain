@@ -774,10 +774,11 @@ const Print3DTab = () => {
 
   // Enhanced checkout function with better error handling and retries
   const handleCheckout = async () => {
-    console.log("Checkout initiated");
+    console.log(`[${new Date().toISOString()}] CHECKOUT STARTED: 3D Print Checkout initiated`);
     
     // Validate required fields
     if (selectedModelIndex === null && !uploadedModelData) {
+      console.error(`[${new Date().toISOString()}] CHECKOUT ERROR: No model selected`);
       toast({
         title: "Please select a model",
         description: "You need to select a model to proceed with checkout",
@@ -791,6 +792,7 @@ const Print3DTab = () => {
     const hasUploadedModel = uploadedModelData !== null;
     
     if (!hasSelectedPredefinedModel && !hasUploadedModel) {
+      console.error(`[${new Date().toISOString()}] CHECKOUT ERROR: No valid model found`);
       toast({
         title: "Model required",
         description: "Please select a model or upload your own before checkout",
@@ -801,6 +803,7 @@ const Print3DTab = () => {
     
     // Check for required filament selection
     if (!selectedFilament) {
+      console.error(`[${new Date().toISOString()}] CHECKOUT ERROR: No filament selected`);
       toast({
         title: "Filament required",
         description: "Please select a filament color before checkout",
@@ -808,6 +811,8 @@ const Print3DTab = () => {
       });
       return;
     }
+    
+    console.log(`[${new Date().toISOString()}] CHECKOUT STATUS: All validation passed, proceeding with checkout`);
     
     // Set loading state
     setIsLoading(true);
@@ -841,17 +846,21 @@ const Print3DTab = () => {
         stlFileData // Send the STL data for the server to store
       };
       
-      console.log("Sending checkout request with data:", {
+      console.log(`[${new Date().toISOString()}] CHECKOUT DATA PREPARED:`, {
         modelName: checkoutData.modelName,
         color: checkoutData.color,
         quantity: checkoutData.quantity,
         finalPrice: checkoutData.finalPrice,
         hasStlFileData: !!checkoutData.stlFileData,
-        stlFileName: checkoutData.stlFileName
+        stlFileDataLength: checkoutData.stlFileData ? checkoutData.stlFileData.length : 0,
+        stlFileName: checkoutData.stlFileName,
+        type: checkoutData.type,
+        timestamp: new Date().toISOString()
       });
       
       // Get the appropriate API URL based on the environment
       const apiUrl = getApiUrl();
+      console.log(`[${new Date().toISOString()}] CHECKOUT API URL: ${apiUrl}`);
       
       // Define possible endpoint patterns to try
       const domainBase = window.location.origin;
@@ -872,162 +881,102 @@ const Print3DTab = () => {
         `${apiUrl}/print/create-checkout-session`,
       ];
       
-      // Add more debug logging
-      console.log("Using endpoint URLs:", possibleEndpoints);
-      console.log("Checkout payload (without STL data):", {
-        ...checkoutData,
-        stlFileData: checkoutData.stlFileData ? "[STL DATA PRESENT]" : null
-      });
-      
-      // Add retry logic to handle potential CORS issues
-      const MAX_RETRIES = 3;
-      const MAX_ENDPOINTS = possibleEndpoints.length;
-      
-      // Function to wait between retries
-      const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
-      
-      // Try all possible endpoints in sequence
-      const attemptCheckout = async (retryCount = 0, endpointIndex = 0) => {
-        // If we've tried all endpoints and retries, fail gracefully
-        if (retryCount >= MAX_RETRIES && endpointIndex >= MAX_ENDPOINTS - 1) {
+      // Function to try each endpoint in sequence
+      const tryEndpoints = async (index = 0) => {
+        if (index >= possibleEndpoints.length) {
+          console.error(`[${new Date().toISOString()}] CHECKOUT ERROR: All endpoints failed`);
+          
           toast({
             title: "Checkout failed",
             description: "Could not connect to checkout service. Please try again later.",
             variant: "destructive",
           });
+          
           setIsLoading(false);
           return;
         }
         
-        const currentEndpoint = possibleEndpoints[endpointIndex];
-        console.log(`Attempt ${retryCount+1}/${MAX_RETRIES}, endpoint ${endpointIndex+1}/${MAX_ENDPOINTS}: ${currentEndpoint}`);
+        const endpoint = possibleEndpoints[index];
+        console.log(`[${new Date().toISOString()}] CHECKOUT ATTEMPT ${index + 1}/${possibleEndpoints.length}: Trying endpoint: ${endpoint}`);
         
         try {
-          // Call the checkout endpoint with appropriate headers
-          const response = await fetch(currentEndpoint, {
-            method: "POST",
+          // Add cache-busting parameter to avoid cached responses
+          const cacheBuster = `?_=${Date.now()}`;
+          const endpointWithCache = `${endpoint}${cacheBuster}`;
+          
+          // Send the checkout request
+          const response = await fetch(endpointWithCache, {
+            method: 'POST',
             headers: {
-              "Content-Type": "application/json",
-              "Accept": "application/json",
-              "Cache-Control": "no-cache",
-              "Pragma": "no-cache",
+              'Content-Type': 'application/json',
+              'X-Checkout-Type': '3d_print', // Custom header to identify the checkout type
+              'X-Client-Timestamp': new Date().toISOString() // Timestamp for debugging
             },
-            body: JSON.stringify(checkoutData),
+            body: JSON.stringify({
+              ...checkoutData,
+              is3DPrint: true, // Explicit flag to indicate 3D print checkout
+              productType: '3d_print', // Another explicit flag
+              clientTimestamp: new Date().toISOString()
+            })
           });
           
+          console.log(`[${new Date().toISOString()}] CHECKOUT RESPONSE STATUS: ${response.status} from endpoint ${endpoint}`);
+          
+          // Handle non-success responses
           if (!response.ok) {
-            console.error(`Endpoint ${currentEndpoint} returned status ${response.status}`);
+            const errorText = await response.text();
+            console.error(`[${new Date().toISOString()}] CHECKOUT ERROR RESPONSE: ${errorText}`);
             
-            // Try to extract error details
-            let errorMessage = `Server error (${response.status})`;
-            try {
-              const errorData = await response.json();
-              errorMessage = errorData.error || errorData.message || errorMessage;
-            } catch (e) {
-              // If we can't parse JSON, try to get text
-              try {
-                errorMessage = await response.text() || errorMessage;
-              } catch (textError) {
-                // Ignore text extraction errors
-              }
+            // If we got a server error (5xx), try the next endpoint
+            if (response.status >= 500) {
+              console.log(`[${new Date().toISOString()}] CHECKOUT RETRY: Server error, trying next endpoint`);
+              return tryEndpoints(index + 1);
             }
             
-            console.error(`Error details: ${errorMessage}`);
+            // For client errors (4xx), show the error
+            toast({
+              title: "Checkout error",
+              description: `Server error: ${response.status}. Please try again.`,
+              variant: "destructive",
+            });
             
-            // For server errors, try the next endpoint
-            if (response.status >= 500 && endpointIndex < MAX_ENDPOINTS - 1) {
-              console.log(`Trying next endpoint (${endpointIndex + 2}/${MAX_ENDPOINTS})...`);
-              return attemptCheckout(retryCount, endpointIndex + 1);
-            }
-            
-            // For client errors that aren't 404, wait and retry the same endpoint
-            if (response.status !== 404 && retryCount < MAX_RETRIES - 1) {
-              console.log(`Retrying same endpoint in 1 second...`);
-              await wait(1000);
-              return attemptCheckout(retryCount + 1, endpointIndex);
-            }
-            
-            // For 404s, immediately try the next endpoint
-            if (response.status === 404 && endpointIndex < MAX_ENDPOINTS - 1) {
-              console.log(`Endpoint not found, trying next endpoint...`);
-              return attemptCheckout(retryCount, endpointIndex + 1);
-            }
-            
-            // If we've tried all endpoints with this retry count, start over with a new retry
-            if (endpointIndex >= MAX_ENDPOINTS - 1 && retryCount < MAX_RETRIES - 1) {
-              console.log(`Tried all endpoints, starting new retry round...`);
-              await wait(1000);
-              return attemptCheckout(retryCount + 1, 0);
-            }
-            
-            throw new Error(errorMessage);
+            setIsLoading(false);
+            return;
           }
           
-          // Try to parse the response
-          let data;
-          try {
-            data = await response.json();
-            console.log("API response:", data);
-          } catch (e) {
-            console.error("Error parsing response:", e);
-            throw new Error("Invalid response from server");
+          // Parse the response
+          const data = await response.json();
+          console.log(`[${new Date().toISOString()}] CHECKOUT SUCCESS RESPONSE:`, data);
+          
+          // Check if we have a checkout URL
+          if (data.url) {
+            console.log(`[${new Date().toISOString()}] CHECKOUT REDIRECT: Redirecting to: ${data.url}`);
+            // Redirect to the checkout page
+            window.location.href = data.url;
+          } else {
+            console.error(`[${new Date().toISOString()}] CHECKOUT ERROR: Missing checkout URL in response`);
+            toast({
+              title: "Checkout error",
+              description: "Invalid response from server. Please try again.",
+              variant: "destructive",
+            });
+            setIsLoading(false);
           }
-          
-          // Handle the debug endpoint response differently
-          if (currentEndpoint.includes('debug-checkout')) {
-            console.log("Debug endpoint response received:", data);
-            
-            // For the debug endpoint, just move to the next endpoint if it worked
-            if (data.success) {
-              console.log("Debug endpoint successful - trying next regular endpoint");
-              return attemptCheckout(retryCount, endpointIndex + 1);
-            }
-            
-            throw new Error("Debug endpoint test failed");
-          }
-          
-          // For regular endpoints, check for the checkout URL
-          if (!data || !data.url) {
-            console.error("Missing checkout URL in response:", data);
-            throw new Error("Server did not return a checkout URL");
-          }
-          
-          // Success! Redirect to Stripe Checkout
-          console.log("Redirecting to Stripe Checkout:", data.url);
-          window.location.href = data.url;
-          
         } catch (error) {
-          console.error(`Checkout attempt ${retryCount + 1} failed:`, error);
+          console.error(`[${new Date().toISOString()}] CHECKOUT FETCH ERROR:`, error);
           
-          // Check if we have more endpoints to try
-          if (endpointIndex < MAX_ENDPOINTS - 1) {
-            console.log(`Trying next endpoint...`);
-            return attemptCheckout(retryCount, endpointIndex + 1);
-          }
-          
-          // Check if we have more retries left
-          if (retryCount < MAX_RETRIES - 1) {
-            console.log(`Retrying with first endpoint in 1 second...`);
-            await wait(1000);
-            return attemptCheckout(retryCount + 1, 0);
-          }
-          
-          // All retries and endpoints failed
-          toast({
-            title: "Checkout failed",
-            description: error instanceof Error ? error.message : "Connection error during checkout",
-            variant: "destructive",
-          });
-          setIsLoading(false);
+          // Try the next endpoint
+          console.log(`[${new Date().toISOString()}] CHECKOUT RETRY: Fetch error, trying next endpoint`);
+          return tryEndpoints(index + 1);
         }
       };
       
-      // Start the checkout process with the first endpoint
-      attemptCheckout(0, 0);
+      // Start trying endpoints
+      tryEndpoints();
     };
     
     try {
-      console.log("Preparing checkout data");
+      console.log(`[${new Date().toISOString()}] CHECKOUT PROCESSING: Preparing STL data`);
       
       if (hasSelectedPredefinedModel && models) {
         // We're using a predefined model from the scene
@@ -1035,12 +984,14 @@ const Print3DTab = () => {
         modelName = model.name;
         stlFileName = `${model.name.toLowerCase().replace(/\s+/g, '_')}.stl`;
         
-        console.log(`Selected predefined model: ${modelName}`);
+        console.log(`[${new Date().toISOString()}] CHECKOUT MODEL: Selected predefined model: ${modelName}`);
         
         // For predefined models, we need to export the STL
         try {
           // Export the selected model to STL format (returns a Blob)
           const stlBlob = exportSelectedModelAsSTL();
+          console.log(`[${new Date().toISOString()}] CHECKOUT STL EXPORT: STL export successful, blob size: ${stlBlob?.size || 'unknown'} bytes`);
+          
           if (stlBlob && stlBlob instanceof Blob) {
             // Create a FileReader to convert Blob to ArrayBuffer
             const reader = new FileReader();
@@ -1058,11 +1009,30 @@ const Print3DTab = () => {
                 // Set the STL file data as a base64 string
                 stlFileData = `data:application/octet-stream;base64,${base64}`;
                 
-                console.log(`Exported STL data for ${modelName}, base64 length: ${stlFileData.length} characters`);
+                console.log(`[${new Date().toISOString()}] CHECKOUT STL DATA: Exported STL data for ${modelName}, base64 length: ${stlFileData.length} characters`);
                 
                 // Continue with checkout process
                 continueCheckoutProcess();
+              } else {
+                console.error(`[${new Date().toISOString()}] CHECKOUT ERROR: Failed to read STL data from FileReader`);
+                toast({
+                  title: "STL Export Failed",
+                  description: "Could not read the exported model data",
+                  variant: "destructive",
+                });
+                setIsLoading(false);
               }
+            };
+            
+            // Add error handler for FileReader
+            reader.onerror = (event) => {
+              console.error(`[${new Date().toISOString()}] CHECKOUT ERROR: FileReader error:`, reader.error);
+              toast({
+                title: "STL Export Failed",
+                description: "Error reading the exported model data",
+                variant: "destructive",
+              });
+              setIsLoading(false);
             };
             
             // Start reading the blob as ArrayBuffer
@@ -1071,90 +1041,77 @@ const Print3DTab = () => {
             // Return here - the checkout will continue asynchronously after the file is read
             return;
           } else {
-            console.warn("Exported STL data is null or not a Blob");
+            console.error(`[${new Date().toISOString()}] CHECKOUT ERROR: STL export failed - no valid blob returned`);
             toast({
-              title: "Export failed",
-              description: "Could not generate STL data in the correct format",
+              title: "STL Export Failed",
+              description: "Could not export the selected model",
               variant: "destructive",
             });
             setIsLoading(false);
             return;
           }
         } catch (exportError) {
-          console.error("Error exporting predefined model to STL:", exportError);
+          console.error(`[${new Date().toISOString()}] CHECKOUT ERROR: STL export error:`, exportError);
           toast({
-            title: "Export failed",
-            description: "Failed to export the model to STL format",
+            title: "STL Export Failed",
+            description: "Could not export the 3D model",
             variant: "destructive",
           });
           setIsLoading(false);
           return;
         }
       } else if (hasUploadedModel && uploadedModelData) {
-        // We're using a user-uploaded model
-        // Handle uploaded model data based on its type
-        if (typeof uploadedModelData === 'object' && 'fileName' in uploadedModelData) {
-          // It's an UploadedModelData object
-          const typedUploadedModelData = uploadedModelData as UploadedModelData;
-          modelName = typedUploadedModelData.fileName || "Custom Model";
-          stlFileName = typedUploadedModelData.fileName || "custom_model.stl";
+        // We're using an uploaded model
+        modelName = "Uploaded Model";
+        stlFileName = typeof uploadedModelData === 'object' && 'fileName' in uploadedModelData 
+          ? uploadedModelData.fileName || "uploaded_model.stl"
+          : "uploaded_model.stl";
+        
+        console.log(`[${new Date().toISOString()}] CHECKOUT MODEL: Using uploaded model: ${stlFileName}`);
+        
+        // Check if we need to convert the uploaded model data
+        if (typeof uploadedModelData === 'object' && 'fileData' in uploadedModelData && 
+            uploadedModelData.fileData && typeof uploadedModelData.fileData === 'string') {
+          // If the data is already a string (likely a data URL), use it directly
+          stlFileData = uploadedModelData.fileData;
+          console.log(`[${new Date().toISOString()}] CHECKOUT STL DATA: Using uploaded STL data, length: ${stlFileData.length} characters`);
+          continueCheckoutProcess();
+          return;
+        } else if (typeof uploadedModelData === 'object' && 'blob' in uploadedModelData && uploadedModelData.blob instanceof Blob) {
+          // If we have a blob, convert it to a data URL
+          console.log(`[${new Date().toISOString()}] CHECKOUT STL PROCESSING: Converting uploaded blob to base64`);
           
-          // If the uploaded data has string content, use it directly
-          if (typedUploadedModelData.data && typeof typedUploadedModelData.data === 'string') {
-            stlFileData = typedUploadedModelData.data;
-            console.log(`Using existing STL data from upload, length: ${stlFileData.length}`);
-          }
-        } else {
-          // It's some other format, use generic name
-          modelName = "Custom Model";
-          stlFileName = "custom_model.stl";
-        }
-        
-        console.log(`Using uploaded model: ${modelName}`);
-        
-        // Try to export the model to STL if we don't already have STL data
-        if (!stlFileData && uploadedModelData instanceof Object3D) {
-          try {
-            console.log("Exporting uploaded model to STL");
-            
-            // Use the STLExporter to convert the model to STL format
-            const exporter = new STLExporter();
-            
-            // Export as STL string
-            const stlString = exporter.parse(uploadedModelData, { binary: false });
-            
-            // Log a preview of the STL data
-            if (typeof stlString === 'string') {
-              const previewLength = Math.min(100, stlString.length);
-              console.log(`STL data exported successfully. Preview: ${stlString.substring(0, previewLength)}...`);
-              console.log(`STL data length: ${stlString.length} characters`);
-              stlFileData = stlString;
-              
-              // Continue with checkout process
+          const reader = new FileReader();
+          reader.onload = (event) => {
+            if (event.target?.result) {
+              stlFileData = event.target.result as string;
+              console.log(`[${new Date().toISOString()}] CHECKOUT STL DATA: Converted uploaded STL blob to data URL, length: ${stlFileData.length} characters`);
               continueCheckoutProcess();
-              return;
             } else {
-              console.log(`STL data exported but is not a string:`, typeof stlString);
+              console.error(`[${new Date().toISOString()}] CHECKOUT ERROR: Failed to read uploaded STL blob`);
               toast({
-                title: "Export failed",
-                description: "Failed to export STL data in the correct format",
+                title: "File Processing Failed",
+                description: "Could not read the uploaded file data",
                 variant: "destructive",
               });
               setIsLoading(false);
-              return;
             }
-          } catch (exportError) {
-            console.error("Error exporting model to STL:", exportError);
+          };
+          
+          reader.onerror = () => {
+            console.error(`[${new Date().toISOString()}] CHECKOUT ERROR: FileReader error for uploaded blob:`, reader.error);
             toast({
-              title: "Export failed",
-              description: "Failed to export your model to STL format",
+              title: "File Processing Failed",
+              description: "Error reading the uploaded file",
               variant: "destructive",
             });
             setIsLoading(false);
-            return;
-          }
+          };
+          
+          reader.readAsDataURL(uploadedModelData.blob);
+          return;
         } else if (!stlFileData) {
-          console.warn("No STL data available for export");
+          console.error(`[${new Date().toISOString()}] CHECKOUT ERROR: No STL data available from uploaded model`);
           toast({
             title: "Model data missing",
             description: "Could not find STL data to send with your order",
@@ -1164,17 +1121,18 @@ const Print3DTab = () => {
           return;
         } else {
           // We already have STL data, continue with checkout
+          console.log(`[${new Date().toISOString()}] CHECKOUT STL DATA: Already have STL data, continuing with checkout`);
           continueCheckoutProcess();
           return;
         }
       } else {
         // Fallback name if no model was properly selected
-        console.warn("No specific model was selected for checkout");
+        console.error(`[${new Date().toISOString()}] CHECKOUT ERROR: No specific model was selected for checkout`);
         setIsLoading(false);
         return;
       }
     } catch (error) {
-      console.error("Error in checkout process:", error);
+      console.error(`[${new Date().toISOString()}] CHECKOUT UNHANDLED ERROR:`, error);
       toast({
         title: "Checkout error",
         description: "An unexpected error occurred during checkout",
