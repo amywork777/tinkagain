@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useCallback } from 'react';
+import React, { useRef, useEffect, useCallback, useContext } from 'react';
 import { Button } from "@/components/ui/button";
 import { useScene } from "@/hooks/use-scene";
 import { Download, Trash, Box, Type, Paintbrush, Upload, Shapes, Bot, Circle, Triangle, CircleDot, Layers, Droplets, Badge, Sparkles, Zap, Pencil, Printer, X, FileText, Layout, Undo, Redo, Image as ImageIcon, Crown, LibraryBig, PencilRuler, Palette } from "lucide-react";
@@ -27,6 +27,7 @@ import { useSubscription } from '@/context/SubscriptionContext';
 import { ThangsEmbed } from "@/components/ThangsEmbed";
 import { ThingiverseEmbed } from "@/components/ThingiverseEmbed";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
+import { FreeModeContext } from "@/pages/FreePage";
 
 // Font options with their display names and paths
 const FONTS = [
@@ -176,6 +177,13 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
   // Add preview canvas ref
   const textPreviewCanvasRef = useRef<HTMLCanvasElement>(null);
 
+  // Use FreeModeContext if available
+  const freeModeCtx = useContext(FreeModeContext);
+  
+  // Components to use based on mode
+  const TaiyakiLibraryComponent = freeModeCtx?.TaiyakiLibraryComponent || TaiyakiLibrary;
+  const MagicFishAIComponent = freeModeCtx?.MagicFishAIComponent || MagicFishAI;
+  
   // Helper function to adjust color brightness
   const adjustColor = (color: string, amount: number) => {
     const hex = color.replace('#', '');
@@ -1663,14 +1671,6 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
               <Layers className="h-5 w-5" />
               <span className="text-xs mt-1">Models</span>
             </TabsTrigger>
-            <TabsTrigger value="library" className="flex justify-center items-center flex-col py-3 px-2 relative">
-              <Shapes className="h-5 w-5" />
-              <span className="text-xs mt-1">Library</span>
-            </TabsTrigger>
-            <TabsTrigger value="assets" className="flex justify-center items-center flex-col py-3 px-2">
-              <FileText className="h-5 w-5" />
-              <span className="text-xs mt-1">Drafts</span>
-            </TabsTrigger>
             <TabsTrigger value="shapes" className="flex justify-center items-center flex-col py-3 px-2">
               <Box className="h-5 w-5" />
               <span className="text-xs mt-1">Shapes</span>
@@ -1690,6 +1690,10 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
             <TabsTrigger value="appearance" className="flex justify-center items-center flex-col py-3 px-2">
               <Paintbrush className="h-5 w-5" />
               <span className="text-xs mt-1">Appearance</span>
+            </TabsTrigger>
+            <TabsTrigger value="library" className="flex justify-center items-center flex-col py-3 px-2 relative">
+              <Shapes className="h-5 w-5" />
+              <span className="text-xs mt-1">Library</span>
             </TabsTrigger>
             <TabsTrigger value="thingiverse" className="flex justify-center items-center flex-col py-3 px-2">
               <LibraryBig className="h-5 w-5" />
@@ -1735,15 +1739,12 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
               <ModelList />
             </TabsContent>
             
-            {/* Library Tab */}
+            {/* Library Tab - Moved to match new tab order */}
             <TabsContent value="library" className="flex-1 overflow-y-auto p-0 h-full" forceMount style={{ display: activeTab === 'library' ? 'block' : 'none' }}>
-              <TaiyakiLibrary />
+              <TaiyakiLibraryComponent />
             </TabsContent>
             
-            {/* Your Assets Tab */}
-            <TabsContent value="assets" className="flex-1 overflow-y-auto p-0 h-full" forceMount style={{ display: activeTab === 'assets' ? 'block' : 'none' }}>
-              <AssetLibrary />
-            </TabsContent>
+            {/* Removed Drafts/Assets tab content */}
             
             {/* Shapes Tab */}
             <TabsContent value="shapes" className="flex-1 overflow-y-auto p-3 h-full">
@@ -1816,7 +1817,7 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
 
             {/* AI Tab - Set forceMount to maintain iframe state when switching tabs */}
             <TabsContent value="ai" className="flex-1 overflow-y-auto p-3 h-full" forceMount style={{ display: activeTab === 'ai' ? 'block' : 'none' }}>
-              <MagicFishAI />
+              <MagicFishAIComponent />
             </TabsContent>
             
             {/* Sketch Tab */}
@@ -2143,7 +2144,7 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
               </div>
             </TabsContent>
             
-            {/* Thingiverse Tab - External 3D models */}
+            {/* Thingiverse Tab */}
             <TabsContent value="thingiverse" className="flex-1 h-full overflow-hidden" forceMount style={{ display: activeTab === 'thingiverse' ? 'block' : 'none' }}>
               <ThingiverseEmbed />
             </TabsContent>
