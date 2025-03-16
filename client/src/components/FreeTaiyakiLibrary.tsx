@@ -8,13 +8,15 @@ export function FreeTaiyakiLibrary() {
 
   return (
     <div className="flex flex-col h-full space-y-4 relative">
-      {/* Overlay with message but no upgrade button */}
-      <div className="absolute inset-0 backdrop-blur-sm bg-background/70 z-10 flex flex-col items-center justify-center p-6">
-        <Lock className="w-12 h-12 text-muted-foreground mb-4" />
-        <h3 className="text-xl font-semibold mb-2">Taiyaki Library Access</h3>
-        <p className="text-center text-muted-foreground mb-4">
-          This feature is not available in this version.
-        </p>
+      {/* More translucent overlay - still blocks interaction but allows visibility */}
+      <div className="absolute inset-0 backdrop-blur-[2px] bg-background/30 z-10 flex flex-col items-center justify-center p-6 pointer-events-auto">
+        <div className="bg-background/80 p-6 rounded-lg shadow-lg flex flex-col items-center max-w-xs text-center">
+          <Lock className="w-10 h-10 text-muted-foreground mb-3" />
+          <h3 className="text-lg font-semibold mb-2">Taiyaki Library Access</h3>
+          <p className="text-sm text-muted-foreground">
+            This feature is not available in the free version. Upgrade to Pro for full access.
+          </p>
+        </div>
       </div>
 
       {/* Basic card structure to match TaiyakiLibrary's appearance */}
@@ -30,7 +32,12 @@ export function FreeTaiyakiLibrary() {
         
         <CardContent className="p-0 h-[calc(100%-12rem)]">
           {/* Empty content area that would normally contain the iframe */}
-          <div className="w-full h-full bg-muted/20"></div>
+          <iframe 
+            src="https://library.taiyaki.ai"
+            className="w-full h-full border-0 pointer-events-none"
+            title="Taiyaki Library (Read-only)"
+            sandbox="allow-scripts allow-same-origin"
+          />
         </CardContent>
         
         <CardFooter className="p-3 flex-col" style={{minHeight: "80px"}}>
