@@ -53,15 +53,15 @@ const getApiUrl = (): string => {
 const API_URL = getApiUrl();
 console.log(`API URL configured as: ${API_URL}`);
 
-// STRIPE KEYS - Using test keys for safe development testing
+// STRIPE KEYS - Using production keys
 const STRIPE_KEYS_CONFIG = {
-  // Test keys
-  PUBLISHABLE_KEY: 'pk_test_51QIaT9CLoBz9jXRlIIzh4kSW2I0D1Fdc4UtnkCIfVgEJDbWgakBfjj5vJaklb3oQd1PA9QVct10x2yTvmlTjQ4X000lDb0TWML',
-  MONTHLY_PRICE: 'price_1R1LlMCLoBz9jXRl3OQ5Q6kE', // Pro Monthly - test price
+  // Test keys - commented out for production
+  // PUBLISHABLE_KEY: 'pk_test_51QIaT9CLoBz9jXRlIIzh4kSW2I0D1Fdc4UtnkCIfVgEJDbWgakBfjj5vJaklb3oQd1PA9QVct10x2yTvmlTjQ4X000lDb0TWML',
+  // MONTHLY_PRICE: 'price_1R1LlMCLoBz9jXRl3OQ5Q6kE', // Pro Monthly - test price
   
-  // Production keys - commented out for safety
-  // PUBLISHABLE_KEY: 'pk_live_51QIaT9CLoBz9jXRlVEQ99Q6V4UiRSYy8ZS49MelsW8EfX1mEijh3K5JQEe5iysIL31cGtf2IsTVIyV1mivoUHCUI00aPpz3GMi',
-  // MONTHLY_PRICE: 'price_1R1jGiCLoBz9jXRlB1uLgvE9', // Pro Monthly - production
+  // Production keys
+  PUBLISHABLE_KEY: 'pk_live_51QIaT9CLoBz9jXRlVEQ99Q6V4UiRSYy8ZS49MelsW8EfX1mEijh3K5JQEe5iysIL31cGtf2IsTVIyV1mivoUHCUI00aPpz3GMi',
+  MONTHLY_PRICE: 'price_1R1jGiCLoBz9jXRlB1uLgvE9', // Pro Monthly - production
 };
 
 // Export the publishable key directly
