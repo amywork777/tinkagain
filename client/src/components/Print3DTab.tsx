@@ -323,8 +323,6 @@ const Print3DTab = () => {
             basePrice = 5 + ((volumeCubicCm - 50) / 150) * 5; // $5-$10
           } else if (volumeCubicCm < 1000) {
             basePrice = 10 + ((volumeCubicCm - 200) / 800) * 20; // $10-$30
-          } else if (volumeCubicCm < 5000) {
-            basePrice = 30 + ((volumeCubicCm - 1000) / 4000) * 70; // $30-$100
       } else {
             // For extremely large models, continue scaling (approximately $15 per 1000 cubic cm)
             basePrice = 100 + ((volumeCubicCm - 5000) / 1000) * 15;
@@ -755,21 +753,28 @@ const Print3DTab = () => {
       return 'http://localhost:3001/api';
     }
     
-    // Production environments - fishcad.com
-    if (hostname.includes('fishcad.com')) {
-      console.log('Production environment detected - using fishcad.com');
+    // Production environments - Taiyaki 3DCAD
+    if (hostname.includes('3dcad.taiyaki.ai')) {
+      console.log('Production environment detected - using 3dcad.taiyaki.ai');
       // Use main domain for production
+      return 'https://3dcad.taiyaki.ai/api';
+    }
+    
+    // Legacy production environments - fishcad.com
+    if (hostname.includes('fishcad.com')) {
+      console.log('Legacy environment detected - using fishcad.com');
       return 'https://fishcad.com/api';
     }
     
     // Fallback to environment variable or default
     const envApiUrl = import.meta.env.VITE_API_URL;
-    const fallback = envApiUrl || 'https://fishcad.com/api';
+    // Update the fallback to use the new domain
+    const fallback = envApiUrl || 'https://3dcad.taiyaki.ai/api';
     console.log(`Using fallback API URL: ${fallback}`);
     return fallback;
   };
 
-  // Update the handleCheckout function
+  // Enhanced checkout function with better error handling and retries
   const handleCheckout = async () => {
     console.log("Checkout initiated");
     
@@ -809,6 +814,11 @@ const Print3DTab = () => {
     // Set loading state
     setIsLoading(true);
     
+    toast({
+      title: "Preparing checkout",
+      description: "Processing your 3D print order...",
+    });
+    
     // Define variables here to be accessible in the helper function
     let modelName: string = "Unknown Model";
     let stlFileName: string = "unknown_model.stl";
@@ -844,69 +854,156 @@ const Print3DTab = () => {
       
       // Get the appropriate API URL based on the environment
       const apiUrl = getApiUrl();
-      const endpoint = `${apiUrl}/create-checkout-session`;
+      
+      // Define possible endpoint patterns to try
+      const domainBase = window.location.origin;
+      const possibleEndpoints = [
+        // Standard API endpoints
+        `${apiUrl}/create-checkout-session`,
+        `${apiUrl}/3d-print/checkout`,
+        `${apiUrl}/checkout`,
+        
+        // Direct domain endpoints without /api
+        `${domainBase}/create-checkout-session`,
+        `${domainBase}/3d-print/checkout`,
+        `${domainBase}/checkout`,
+        
+        // Alternative path structure
+        `${domainBase}/api/create-checkout-session`,
+        `${domainBase}/api/3d-print/checkout`,
+        `${domainBase}/api/checkout`
+      ];
       
       // Add retry logic to handle potential CORS issues
       const MAX_RETRIES = 3;
-      const attemptCheckout = async (retryCount = 0) => {
+      const MAX_ENDPOINTS = possibleEndpoints.length;
+      
+      // Function to wait between retries
+      const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+      
+      // Try all possible endpoints in sequence
+      const attemptCheckout = async (retryCount = 0, endpointIndex = 0) => {
+        // If we've tried all endpoints and retries, fail gracefully
+        if (retryCount >= MAX_RETRIES && endpointIndex >= MAX_ENDPOINTS - 1) {
+          toast({
+            title: "Checkout failed",
+            description: "Could not connect to checkout service. Please try again later.",
+            variant: "destructive",
+          });
+          setIsLoading(false);
+          return;
+        }
+        
+        const currentEndpoint = possibleEndpoints[endpointIndex];
+        console.log(`Attempt ${retryCount+1}/${MAX_RETRIES}, endpoint ${endpointIndex+1}/${MAX_ENDPOINTS}: ${currentEndpoint}`);
+        
         try {
-          // Call the checkout endpoint
-          const response = await fetch(endpoint, {
+          // Call the checkout endpoint with appropriate headers
+          const response = await fetch(currentEndpoint, {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
+              "Accept": "application/json",
+              "Cache-Control": "no-cache",
+              "Pragma": "no-cache",
             },
             body: JSON.stringify(checkoutData),
           });
           
           if (!response.ok) {
-            throw new Error(`Server returned ${response.status}: ${response.statusText}`);
+            console.error(`Endpoint ${currentEndpoint} returned status ${response.status}`);
+            
+            // Try to extract error details
+            let errorMessage = `Server error (${response.status})`;
+            try {
+              const errorData = await response.json();
+              errorMessage = errorData.error || errorData.message || errorMessage;
+            } catch (e) {
+              // If we can't parse JSON, try to get text
+              try {
+                errorMessage = await response.text() || errorMessage;
+              } catch (textError) {
+                // Ignore text extraction errors
+              }
+            }
+            
+            console.error(`Error details: ${errorMessage}`);
+            
+            // For server errors, try the next endpoint
+            if (response.status >= 500 && endpointIndex < MAX_ENDPOINTS - 1) {
+              console.log(`Trying next endpoint (${endpointIndex + 2}/${MAX_ENDPOINTS})...`);
+              return attemptCheckout(retryCount, endpointIndex + 1);
+            }
+            
+            // For client errors that aren't 404, wait and retry the same endpoint
+            if (response.status !== 404 && retryCount < MAX_RETRIES - 1) {
+              console.log(`Retrying same endpoint in 1 second...`);
+              await wait(1000);
+              return attemptCheckout(retryCount + 1, endpointIndex);
+            }
+            
+            // For 404s, immediately try the next endpoint
+            if (response.status === 404 && endpointIndex < MAX_ENDPOINTS - 1) {
+              console.log(`Endpoint not found, trying next endpoint...`);
+              return attemptCheckout(retryCount, endpointIndex + 1);
+            }
+            
+            // If we've tried all endpoints with this retry count, start over with a new retry
+            if (endpointIndex >= MAX_ENDPOINTS - 1 && retryCount < MAX_RETRIES - 1) {
+              console.log(`Tried all endpoints, starting new retry round...`);
+              await wait(1000);
+              return attemptCheckout(retryCount + 1, 0);
+            }
+            
+            throw new Error(errorMessage);
           }
           
-          const data = await response.json();
-          
-          if (data.url) {
-            // Redirect to Stripe Checkout
-            console.log("Redirecting to Stripe Checkout:", data.url);
-            window.location.href = data.url;
-          } else {
-            throw new Error("No checkout URL returned from server");
+          // Try to parse the response
+          let data;
+          try {
+            data = await response.json();
+          } catch (e) {
+            console.error("Error parsing response:", e);
+            throw new Error("Invalid response from server");
           }
+          
+          if (!data || !data.url) {
+            console.error("Missing checkout URL in response:", data);
+            throw new Error("Server did not return a checkout URL");
+          }
+          
+          // Success! Redirect to Stripe Checkout
+          console.log("Redirecting to Stripe Checkout:", data.url);
+          window.location.href = data.url;
+          
         } catch (error) {
           console.error(`Checkout attempt ${retryCount + 1} failed:`, error);
           
-          // Retry with a different endpoint format if we have retries left
-          if (retryCount < MAX_RETRIES - 1) {
-            toast({
-              title: "Retrying checkout",
-              description: "Connection issue detected, retrying...",
-              variant: "default",
-            });
-            
-            // Try alternative endpoints on retries
-            if (retryCount === 0) {
-              // Try without /api prefix on first retry
-              const altEndpoint = apiUrl.replace('/api', '') + '/create-checkout-session';
-              return attemptCheckout(retryCount + 1);
-            } else {
-              // Try with www prefix on second retry
-              const wwwEndpoint = apiUrl.replace('https://', 'https://www.') + '/create-checkout-session';
-              return attemptCheckout(retryCount + 1);
-            }
-          } else {
-            // All retries failed
-            toast({
-              title: "Checkout failed",
-              description: error instanceof Error ? error.message : "Failed to create checkout session",
-              variant: "destructive",
-            });
-            setIsLoading(false);
+          // Check if we have more endpoints to try
+          if (endpointIndex < MAX_ENDPOINTS - 1) {
+            console.log(`Trying next endpoint...`);
+            return attemptCheckout(retryCount, endpointIndex + 1);
           }
+          
+          // Check if we have more retries left
+          if (retryCount < MAX_RETRIES - 1) {
+            console.log(`Retrying with first endpoint in 1 second...`);
+            await wait(1000);
+            return attemptCheckout(retryCount + 1, 0);
+          }
+          
+          // All retries and endpoints failed
+          toast({
+            title: "Checkout failed",
+            description: error instanceof Error ? error.message : "Connection error during checkout",
+            variant: "destructive",
+          });
+          setIsLoading(false);
         }
       };
       
-      // Start the checkout process with retries
-      attemptCheckout();
+      // Start the checkout process with the first endpoint
+      attemptCheckout(0, 0);
     };
     
     try {
