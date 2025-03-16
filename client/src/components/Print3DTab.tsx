@@ -1191,7 +1191,7 @@ const Print3DTab = () => {
                 </>
               ) : (
             <>
-              Checkout (${formatPrice(finalPrice)})
+              Checkout ({formatPrice(finalPrice)})
             </>
               )}
             </Button>

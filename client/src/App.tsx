@@ -8,6 +8,7 @@ import ThingiverseCallback from './pages/ThingiverseCallback';
 import SuccessPage from './components/SuccessPage';
 import CheckoutConfirmation from './pages/CheckoutConfirmation';
 import OrderDetails from './components/OrderDetails';
+import FreePage from './pages/FreePage';
 
 export default function App() {
   return (
@@ -21,6 +22,7 @@ export default function App() {
         <Route path="/success" element={<SuccessPage />} />
         <Route path="/checkout-confirmation" element={<CheckoutConfirmation />} />
         <Route path="/order/:orderId" element={<OrderDetails />} />
+        <Route path="/free" element={<FreePage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </BrowserRouter>

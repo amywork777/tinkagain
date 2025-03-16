@@ -173,13 +173,13 @@ export function TransformControls({ className }: { className?: string }) {
       newPosition.x = value;
       setXPosition(value);
     } else if (axis === 'y') {
-      // Y input controls Z (height)
-      newPosition.z = value;
-      setZPosition(value);
-    } else {
-      // Z input controls Y (depth)
+      // Y input controls Y position
       newPosition.y = value;
       setYPosition(value);
+    } else {
+      // Z input controls Z position
+      newPosition.z = value;
+      setZPosition(value);
     }
     
     setPositionValues(newPosition);
@@ -196,13 +196,13 @@ export function TransformControls({ className }: { className?: string }) {
       newRotation.x = value;
       setXRotation(value);
     } else if (axis === 'y') {
-      // Y input controls Z rotation
-      newRotation.z = value;
-      setZRotation(value);
-    } else {
-      // Z input controls Y rotation
+      // Y input controls Y rotation
       newRotation.y = value;
       setYRotation(value);
+    } else {
+      // Z input controls Z rotation
+      newRotation.z = value;
+      setZRotation(value);
     }
     
     setRotationValues(newRotation);
