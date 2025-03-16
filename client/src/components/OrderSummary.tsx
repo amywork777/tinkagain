@@ -1,12 +1,10 @@
 import React from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { 
   CheckCircle2, 
   AlertCircle, 
-  Loader2, 
-  Package 
+  Loader2
 } from "lucide-react";
 
 export interface OrderSummaryProps {
@@ -98,132 +96,100 @@ export function OrderSummary({
   
   return (
     <Card className="w-full shadow-sm">
-      <CardHeader className="pb-3">
-        <div className="flex items-center justify-between">
-          <div>
-            <CardTitle className="text-xl">Order Summary</CardTitle>
-            {connectionStatus === 'success' ? (
-              <CardDescription className="flex items-center text-primary">
-                <CheckCircle2 className="h-4 w-4 mr-1" />
-                Volume-based pricing calculation
-              </CardDescription>
-            ) : connectionStatus === 'connecting' ? (
-              <CardDescription className="flex items-center text-amber-500">
-                <Loader2 className="h-4 w-4 mr-1 animate-spin" />
-                {connectionAttempts > 1 
-                  ? `Calculating from model dimensions (${connectionAttempts})...` 
-                  : 'Analyzing model geometry...'}
-              </CardDescription>
-            ) : connectionStatus === 'retrying' ? (
-              <CardDescription className="flex items-center text-amber-500">
-                <AlertCircle className="h-4 w-4 mr-1" />
-                Refining calculation...
-              </CardDescription>
-            ) : connectionStatus === 'failed' ? (
-              <CardDescription className="flex items-center text-amber-500">
-                <AlertCircle className="h-4 w-4 mr-1" />
-                Using standard pricing
-              </CardDescription>
-            ) : (
-              <CardDescription className="flex items-center text-muted-foreground">
-                <AlertCircle className="h-4 w-4 mr-1" />
-                Estimated based on item count
-              </CardDescription>
-            )}
-          </div>
-          <Button 
-            variant="ghost" 
-            size="sm" 
-            onClick={onCalculatePrice}
-            disabled={isPriceCalculating || isPreparing}
-            className="h-8 px-2"
-          >
-            {isPriceCalculating || isPreparing ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Package className="h-4 w-4" />
-            )}
-            <span className="ml-1 text-xs">
-              {isPriceCalculating ? 'Calculating...' : 
-               isPreparing ? 'Preparing...' : 'Calculate Price'}
-            </span>
-          </Button>
+      <CardHeader className="pb-2">
+        <div>
+          <CardTitle className="text-lg font-medium">Order Summary</CardTitle>
+          {connectionStatus === 'connecting' ? (
+            <CardDescription className="flex items-center text-amber-500">
+              <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+              Analyzing model
+            </CardDescription>
+          ) : connectionStatus === 'retrying' ? (
+            <CardDescription className="flex items-center text-amber-500">
+              <AlertCircle className="h-3.5 w-3.5 mr-1" />
+              Refining calculation
+            </CardDescription>
+          ) : connectionStatus === 'failed' ? (
+            <CardDescription className="flex items-center text-amber-500">
+              <AlertCircle className="h-3.5 w-3.5 mr-1" />
+              Using standard pricing
+            </CardDescription>
+          ) : connectionStatus !== 'success' && (
+            <CardDescription className="flex items-center text-muted-foreground">
+              <AlertCircle className="h-3.5 w-3.5 mr-1" />
+              Estimated pricing
+            </CardDescription>
+          )}
         </div>
       </CardHeader>
-      <CardContent className="space-y-3">
-        <div className="flex justify-between items-center">
-          <span>Model:</span>
-          <span>
-            {selectedModelName || 'No model selected'}
-          </span>
-        </div>
-        
-        <div className="flex justify-between items-center">
-          <span>Material:</span>
-          <span className="capitalize">
-            {selectedFilament || 'None'}
-          </span>
-        </div>
-        
-        <div className="flex justify-between items-center">
-          <span>Quantity:</span>
-          <span>{quantity} {quantity === 1 ? 'item' : 'items'}</span>
-        </div>
-        
-        {complexityFactor > 1.05 && (
-          <div className="flex justify-between items-center">
-            <span>Complexity:</span>
-            <span className={complexityFactor > 1.3 ? "text-amber-600 font-medium" : ""}>
-              {complexityFactor >= 1.5 ? "Very High" : 
-               complexityFactor >= 1.3 ? "High" : 
-               complexityFactor >= 1.2 ? "Medium" : "Low"}
-              {complexityFactor > 1.3 && " (+price)"}
-            </span>
+      <CardContent className="space-y-4 pt-0">
+        {/* Model info section */}
+        <div className="grid grid-cols-[120px_1fr] gap-y-2 text-sm">
+          <div className="text-muted-foreground">Model</div>
+          <div className="font-medium truncate">
+            {selectedModelName || 'Not selected'}
           </div>
-        )}
-        
-        <Separator className="my-2" />
-        
-        <div className="flex justify-between items-center text-sm">
-          <span>Per Item:</span>
-          <span>{formatPrice(basePrice / quantity)}</span>
+          
+          <div className="text-muted-foreground">Material</div>
+          <div className="font-medium capitalize">
+            {selectedFilament || 'None'}
+          </div>
+          
+          <div className="text-muted-foreground">Quantity</div>
+          <div className="font-medium">
+            {quantity}
+          </div>
+          
+          {complexityFactor > 1.05 && (
+            <>
+              <div className="text-muted-foreground">Complexity</div>
+              <div className={`font-medium ${complexityFactor > 1.3 ? "text-amber-600" : ""}`}>
+                {complexityFactor >= 1.5 ? "Very High" : 
+                 complexityFactor >= 1.3 ? "High" : 
+                 complexityFactor >= 1.2 ? "Medium" : "Low"}
+              </div>
+            </>
+          )}
         </div>
         
-        <div className="flex justify-between items-center text-md mt-1">
-          <span>Subtotal ({quantity} {quantity === 1 ? 'item' : 'items'}):</span>
-          <span>{formatPrice(basePrice)}</span>
+        <Separator />
+        
+        {/* Price breakdown section */}
+        <div className="grid grid-cols-[1fr_auto] gap-y-2 text-sm">
+          <div className="text-muted-foreground">Per Item</div>
+          <div className="font-medium">{formatPrice(basePrice / quantity)}</div>
+          
+          <div className="text-muted-foreground">Subtotal</div>
+          <div className="font-medium">{formatPrice(basePrice)}</div>
+          
+          <div className="text-muted-foreground">Shipping</div>
+          <div className="font-medium">{basePrice > 50 ? '$10.00' : '$5.00'}</div>
+          
+          <Separator className="col-span-2 my-1" />
+          
+          <div className="text-base font-medium pt-1">Total</div>
+          <div className="text-base font-medium pt-1">{formatPrice(finalPrice)}</div>
         </div>
         
-        <div className="flex justify-between items-center text-sm mt-1">
-          <span>Shipping:</span>
-          <span>{basePrice > 50 ? '$10.00' : '$5.00'}</span>
-        </div>
-        
-        <Separator className="my-2" />
-        
-        <div className="flex justify-between items-center font-semibold">
-          <span>Total Price:</span>
-          <span>{formatPrice(finalPrice)}</span>
-        </div>
-        
+        {/* Status messages */}
         {(isPriceCalculating || isPreparing) && (
-          <div className="flex items-center justify-center py-2 text-muted-foreground">
+          <div className="flex items-center justify-center py-1 text-muted-foreground">
             <Loader2 className="h-4 w-4 animate-spin mr-2" />
             <span className="text-sm">
-              {isPreparing ? 'Preparing model...' : 'Calculating dimensions...'}
+              {isPreparing ? 'Preparing model' : 'Calculating price'}
             </span>
           </div>
         )}
         
         {connectionStatus === 'failed' && !isPriceCalculating && !isPreparing && (
-          <div className="bg-amber-50 p-2 rounded-md text-xs text-amber-800 mt-2">
+          <div className="bg-amber-50 p-2 rounded-md text-xs text-amber-800">
             <p className="flex items-start">
-              <AlertCircle className="h-4 w-4 mr-1 shrink-0 mt-0.5" />
+              <AlertCircle className="h-3.5 w-3.5 mr-1 shrink-0 mt-0.5" />
               <span>
                 Using standard pricing based on quantity.
                 {connectionAttempts > 1 && (
                   <span className="block mt-1">
-                    For more accurate pricing, view your model in the 3D viewer first.
+                    View your model in 3D for accurate pricing.
                   </span>
                 )}
               </span>
