@@ -1,5 +1,7 @@
 import { VercelRequest, VercelResponse } from '@vercel/node';
 
+// Debug endpoint for 3D printing checkout - helps identify API connectivity issues
+// Updated with additional logging for better troubleshooting
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   // Set appropriate CORS headers
   res.setHeader('Access-Control-Allow-Credentials', 'true');
