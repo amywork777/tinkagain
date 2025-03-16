@@ -172,84 +172,44 @@ export default function Home() {
           <div className="flex items-center space-x-2">
             <FeedbackDialog />
             
-            {/* Pro Badge or Upgrade Button */}
-            {isAuthenticated && (
-              <>
-                {isProUser ? (
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Badge className="bg-primary text-white flex items-center h-7 px-2 mr-1">
-                        <CrownIcon className="h-3 w-3 mr-1" />
-                        <span>Pro</span>
-                      </Badge>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      <p>You have a Pro subscription</p>
-                    </TooltipContent>
-                  </Tooltip>
-                ) : (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={navigateToPricing}
-                    className="gap-1"
-                  >
-                    <CrownIcon className="h-4 w-4" />
-                    <span>Upgrade to Pro</span>
-                  </Button>
-                )}
-              </>
-            )}
-            
             {/* User Avatar or Login Button */}
             {isAuthenticated ? (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Avatar className="h-8 w-8 cursor-pointer">
-                    {user?.profilePicture ? (
-                      <AvatarImage src={user.profilePicture} alt={user.displayName} />
-                    ) : (
-                      <AvatarFallback>
-                        {user?.displayName?.substring(0, 2) || <User className="h-4 w-4" />}
-                      </AvatarFallback>
-                    )}
-                  </Avatar>
+                  <Button variant="ghost" size="icon" className="rounded-full">
+                    <Avatar className="h-8 w-8">
+                      <AvatarImage src={user?.profilePicture || undefined} />
+                      <AvatarFallback>{user?.displayName?.[0] || user?.email?.[0] || "U"}</AvatarFallback>
+                    </Avatar>
+                  </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
-                  <DropdownMenuLabel>{user?.displayName}</DropdownMenuLabel>
-                  <DropdownMenuLabel className="text-xs text-muted-foreground">{user?.email}</DropdownMenuLabel>
-                  {isProUser && (
-                    <DropdownMenuLabel className="flex items-center">
-                      <Badge className="bg-primary/10 text-primary flex items-center">
-                        <CrownIcon className="h-3 w-3 mr-1" />
-                        <span>Pro Subscription</span>
-                      </Badge>
-                    </DropdownMenuLabel>
-                  )}
+                  <DropdownMenuLabel className="font-normal">
+                    <div className="flex flex-col space-y-1">
+                      <p className="text-sm font-medium leading-none">{user?.displayName || 'User'}</p>
+                      <p className="text-xs leading-none text-muted-foreground">{user?.email || ''}</p>
+                    </div>
+                  </DropdownMenuLabel>
                   <DropdownMenuSeparator />
-                  {!isProUser && (
-                    <DropdownMenuItem onClick={navigateToPricing}>
-                      <CrownIcon className="h-4 w-4 mr-2" />
-                      <span>Upgrade to Pro</span>
-                    </DropdownMenuItem>
-                  )}
                   <DropdownMenuItem onClick={logout}>
                     <LogOut className="h-4 w-4 mr-2" />
-                    <span>Log out</span>
+                    Log out
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
             ) : (
-              <Button
-                variant="outline"
+              <Button 
+                variant="ghost" 
                 size="sm"
                 onClick={login}
-                data-auth-skip
+                className="ml-auto"
               >
-                <LogIn className="h-4 w-4 mr-2" />
-                <span>Sign in</span>
+                <User className="h-4 w-4 mr-1" />
+                <span>Log in</span>
               </Button>
             )}
+            
+            <ThemeToggle />
           </div>
         </div>
 

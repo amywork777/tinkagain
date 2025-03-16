@@ -369,27 +369,12 @@ export function MagicFishAI() {
         </CardContent>
         
         <CardFooter className="p-3 flex-col" style={{minHeight: "80px"}}>
-          {/* Pro feature indicator */}
+          {/* Information about the feature */}
           <div className="w-full flex items-center justify-center">
-            {subscription.isPro ? (
-              <div className="flex items-center">
-                <Info className="h-3 w-3 text-muted-foreground mr-1" />
-                <span className="text-xs text-muted-foreground">Pro Feature: Create custom 3D models with AI</span>
-              </div>
-            ) : (
-              <div className="flex items-center justify-between w-full">
-                <span className="text-xs text-muted-foreground">Upgrade to unlock this feature</span>
-                <Button 
-                  variant="outline" 
-                  size="sm"
-                  className="text-xs"
-                  onClick={() => navigate('/pricing')}
-                >
-                  <Crown className="h-3 w-3 mr-1" />
-                  Upgrade to Pro
-                </Button>
-              </div>
-            )}
+            <div className="flex items-center">
+              <Info className="h-3 w-3 text-muted-foreground mr-1" />
+              <span className="text-xs text-muted-foreground">Create custom 3D models with AI</span>
+            </div>
           </div>
         </CardFooter>
       </Card>

@@ -26,6 +26,7 @@ import { imageToSvg } from "@/lib/imageToSvg";
 import { useSubscription } from '@/context/SubscriptionContext';
 import { ThangsEmbed } from "@/components/ThangsEmbed";
 import { ThingiverseEmbed } from "@/components/ThingiverseEmbed";
+import { ThemeToggle } from "@/components/ui/theme-toggle";
 
 // Font options with their display names and paths
 const FONTS = [
@@ -1636,15 +1637,18 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
     <div className="h-full flex flex-col">
       <div className="p-4 flex items-center justify-between border-b">
         <h1 className="text-xl font-bold">FishCAD</h1>
-        {onClose && (
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={onClose}
-          >
-            <X className="h-4 w-4" />
-          </Button>
-        )}
+        <div className="flex items-center">
+          <ThemeToggle className="mr-2" />
+          {onClose && (
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={onClose}
+            >
+              <X className="h-4 w-4" />
+            </Button>
+          )}
+        </div>
       </div>
       
       <div className="flex-1 flex flex-col">
@@ -1662,11 +1666,6 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
             <TabsTrigger value="library" className="flex justify-center items-center flex-col py-3 px-2 relative">
               <Shapes className="h-5 w-5" />
               <span className="text-xs mt-1">Library</span>
-              {!subscription.isPro && (
-                <div style={libraryPremiumIconStyle}>
-                  <Crown className="h-3 w-3 text-orange-500" />
-                </div>
-              )}
             </TabsTrigger>
             <TabsTrigger value="assets" className="flex justify-center items-center flex-col py-3 px-2">
               <FileText className="h-5 w-5" />
@@ -1679,11 +1678,6 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
             <TabsTrigger value="ai" className="flex justify-center items-center flex-col py-3 px-2 relative">
               <Bot className="h-5 w-5" />
               <span className="text-xs mt-1">AI</span>
-              {!subscription.isPro && (
-                <div style={aiPremiumIconStyle}>
-                  <Crown className="h-3 w-3 text-orange-500" />
-                </div>
-              )}
             </TabsTrigger>
             <TabsTrigger value="sketch" className="flex justify-center items-center flex-col py-3 px-2">
               <Pencil className="h-5 w-5" />
