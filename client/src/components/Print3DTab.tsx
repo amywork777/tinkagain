@@ -36,11 +36,28 @@ interface FilamentColor {
 
 interface FilamentApiItem {
   id?: string;
-  filament?: string;
   name?: string;
+  filament?: string;
   hex?: string;
   color?: string;
-  [key: string]: any; // For any other properties
+  [key: string]: any;
+}
+
+interface Mandarin3DFilament {
+  _id: string;
+  filament_id: string;
+  filament_brand: string;
+  filament_name: string;
+  filament_color: string;
+  filament_unit_price: number;
+  filament_image_url: string;
+  filament_mass_in_grams: number;
+  filament_link: string;
+}
+
+interface Mandarin3DResponse {
+  status: string;
+  result: Mandarin3DFilament[];
 }
 
 // Interface for uploaded model data
@@ -126,67 +143,65 @@ const Print3DTab = () => {
   const fetchFilaments = async () => {
     setIsLoading(true);
     try {
-      const response = await getFilaments();
-      console.log('Filament API response:', response);
+      // Fetch filaments from Mandarin3D API
+      const response = await fetch('https://backend.mandarin3d.com/api/filaments', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          action: 'list'
+        })
+      });
+
+      const data = await response.json() as Mandarin3DResponse;
+      console.log('Filament API response:', data);
       
-      // Normalize the data to ensure consistent structure
-      let colors = [];
-      
-      if (Array.isArray(response)) {
-        colors = response.map((item: FilamentApiItem) => {
-          // Clean the name to remove any "PLA" to avoid redundancy
-          let name = item.name || item.filament || 'Unknown Color';
-          name = name.replace(/\bPLA\b/gi, '').trim();
-          name = name.replace(/^[\s-]+|[\s-]+$/g, ''); // Remove leading/trailing spaces and hyphens
-          
-          return {
-          id: item.id || item.filament || item.name || 'unknown',
-            name: name,
-          hex: item.hex || item.color || '#808080'
-          };
-        });
-      } else if (response && response.filaments && Array.isArray(response.filaments)) {
-        colors = response.filaments.map((item: FilamentApiItem) => {
-          // Clean the name to remove any "PLA" to avoid redundancy
-          let name = item.name || item.filament || 'Unknown Color';
-          name = name.replace(/\bPLA\b/gi, '').trim();
-          name = name.replace(/^[\s-]+|[\s-]+$/g, ''); // Remove leading/trailing spaces and hyphens
-          
-          return {
-          id: item.id || item.filament || item.name || 'unknown',
-            name: name,
-          hex: item.hex || item.color || '#808080'
-          };
-        });
+      // Check if we have a successful response with results
+      if (data.status === 'success' && Array.isArray(data.result)) {
+        const colors = data.result.map((item: Mandarin3DFilament) => ({
+          id: item.filament_id,
+          name: `${item.filament_brand} ${item.filament_name}`.replace(/\bPLA\b/gi, '').trim(),
+          hex: item.filament_color || '#808080',
+          price: item.filament_unit_price,
+          imageUrl: item.filament_image_url,
+          brand: item.filament_brand,
+          mass: item.filament_mass_in_grams,
+          link: item.filament_link
+        }));
+
+        console.log('Normalized filament colors:', colors);
+        
+        if (colors.length > 0) {
+          setFilamentColors(colors);
+          setSelectedFilament(colors[0].id);
+          return;
+        }
       }
+
+      // If we get here, either the API call failed or returned no colors
+      // Use fallback colors
+      const fallbackColors = [
+        { id: 'black-pla', name: 'Black', hex: '#121212' },
+        { id: 'white-pla', name: 'White', hex: '#f9f9f9' },
+        { id: 'gray-pla', name: 'Gray', hex: '#9e9e9e' },
+        { id: 'red-pla', name: 'Red', hex: '#f44336' },
+        { id: 'blue-pla', name: 'Royal Blue', hex: '#1976d2' },
+        { id: 'green-pla', name: 'Forest Green', hex: '#2e7d32' },
+        { id: 'yellow-pla', name: 'Bright Yellow', hex: '#fbc02d' },
+        { id: 'orange-pla', name: 'Orange', hex: '#ff9800' },
+        { id: 'purple-pla', name: 'Purple', hex: '#7b1fa2' },
+        { id: 'pink-pla', name: 'Hot Pink', hex: '#e91e63' },
+        { id: 'teal-pla', name: 'Teal', hex: '#009688' },
+        { id: 'silver-pla', name: 'Silver Metallic', hex: '#b0bec5' },
+        { id: 'gold-pla', name: 'Gold Metallic', hex: '#ffd700' },
+        { id: 'bronze-pla', name: 'Bronze Metallic', hex: '#cd7f32' },
+        { id: 'glow-pla', name: 'Glow-in-the-Dark', hex: '#c6ff00' }
+      ];
       
-      console.log('Normalized filament colors:', colors);
+      setFilamentColors(fallbackColors);
+      setSelectedFilament(fallbackColors[0].id);
       
-      // Use fallback if no valid colors found
-      if (colors.length === 0) {
-        colors = [
-          { id: 'black-pla', name: 'Black', hex: '#121212' },
-          { id: 'white-pla', name: 'White', hex: '#f9f9f9' },
-          { id: 'gray-pla', name: 'Gray', hex: '#9e9e9e' },
-          { id: 'red-pla', name: 'Red', hex: '#f44336' },
-          { id: 'blue-pla', name: 'Royal Blue', hex: '#1976d2' },
-          { id: 'green-pla', name: 'Forest Green', hex: '#2e7d32' },
-          { id: 'yellow-pla', name: 'Bright Yellow', hex: '#fbc02d' },
-          { id: 'orange-pla', name: 'Orange', hex: '#ff9800' },
-          { id: 'purple-pla', name: 'Purple', hex: '#7b1fa2' },
-          { id: 'pink-pla', name: 'Hot Pink', hex: '#e91e63' },
-          { id: 'teal-pla', name: 'Teal', hex: '#009688' },
-          { id: 'silver-pla', name: 'Silver Metallic', hex: '#b0bec5' },
-          { id: 'gold-pla', name: 'Gold Metallic', hex: '#ffd700' },
-          { id: 'bronze-pla', name: 'Bronze Metallic', hex: '#cd7f32' },
-          { id: 'glow-pla', name: 'Glow-in-the-Dark', hex: '#c6ff00' }
-        ];
-      }
-      
-      setFilamentColors(colors);
-      if (colors.length > 0) {
-        setSelectedFilament(colors[0].id);
-      }
     } catch (err) {
       console.error('Error fetching filaments:', err);
       toast({
