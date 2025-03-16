@@ -856,21 +856,28 @@ const Print3DTab = () => {
       // Define possible endpoint patterns to try
       const domainBase = window.location.origin;
       const possibleEndpoints = [
-        // Standard API endpoints
-        `${apiUrl}/create-checkout-session`,
-        `${apiUrl}/3d-print/checkout`,
+        // Debug endpoint - try first to verify connectivity
+        `${domainBase}/api/debug-checkout`,
+        
+        // Primary endpoints - simplified to try the most likely ones first
+        `${domainBase}/api/checkout`,
         `${apiUrl}/checkout`,
         
-        // Direct domain endpoints without /api
-        `${domainBase}/create-checkout-session`,
-        `${domainBase}/3d-print/checkout`,
-        `${domainBase}/checkout`,
-        
-        // Alternative path structure
+        // Alternative endpoints
         `${domainBase}/api/create-checkout-session`,
-        `${domainBase}/api/3d-print/checkout`,
-        `${domainBase}/api/checkout`
+        `${apiUrl}/create-checkout-session`,
+        
+        // Fallback endpoints
+        `${domainBase}/api/print/create-checkout-session`,
+        `${apiUrl}/print/create-checkout-session`,
       ];
+      
+      // Add more debug logging
+      console.log("Using endpoint URLs:", possibleEndpoints);
+      console.log("Checkout payload (without STL data):", {
+        ...checkoutData,
+        stlFileData: checkoutData.stlFileData ? "[STL DATA PRESENT]" : null
+      });
       
       // Add retry logic to handle potential CORS issues
       const MAX_RETRIES = 3;
@@ -960,11 +967,26 @@ const Print3DTab = () => {
           let data;
           try {
             data = await response.json();
+            console.log("API response:", data);
           } catch (e) {
             console.error("Error parsing response:", e);
             throw new Error("Invalid response from server");
           }
           
+          // Handle the debug endpoint response differently
+          if (currentEndpoint.includes('debug-checkout')) {
+            console.log("Debug endpoint response received:", data);
+            
+            // For the debug endpoint, just move to the next endpoint if it worked
+            if (data.success) {
+              console.log("Debug endpoint successful - trying next regular endpoint");
+              return attemptCheckout(retryCount, endpointIndex + 1);
+            }
+            
+            throw new Error("Debug endpoint test failed");
+          }
+          
+          // For regular endpoints, check for the checkout URL
           if (!data || !data.url) {
             console.error("Missing checkout URL in response:", data);
             throw new Error("Server did not return a checkout URL");

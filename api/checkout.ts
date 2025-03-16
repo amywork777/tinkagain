@@ -4,10 +4,13 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 
-// Initialize Stripe
+// Initialize Stripe - Fix for environment variable issue
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || '', {
   apiVersion: '2023-10-16' as any,
 });
+
+// Log the Stripe initialization to help with debugging
+console.log(`Stripe initialized with key ${process.env.STRIPE_SECRET_KEY ? 'present' : 'MISSING'}`);
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   // Set appropriate CORS headers
