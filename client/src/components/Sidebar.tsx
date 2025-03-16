@@ -1,11 +1,10 @@
-import React, { useRef, useEffect, useCallback, useContext } from 'react';
+import React, { useState, useRef, useEffect, useContext, useMemo, useCallback } from 'react';
 import { Button } from "@/components/ui/button";
 import { useScene } from "@/hooks/use-scene";
-import { Download, Trash, Box, Type, Paintbrush, Upload, Shapes, Bot, Circle, Triangle, CircleDot, Layers, Droplets, Badge, Sparkles, Zap, Pencil, Printer, X, FileText, Layout, Undo, Redo, Image as ImageIcon, Crown, LibraryBig, PencilRuler, Palette } from "lucide-react";
+import { Download, Trash, Box, Type, Paintbrush, Upload, Shapes, Bot, Circle, Triangle, CircleDot, Layers, Droplets, Badge as BadgeIcon, Sparkles, Zap, Pencil, Printer, X, FileText, Layout, Undo, Redo, Image as ImageIcon, Crown, LibraryBig, PencilRuler, Palette } from "lucide-react";
 import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
 import { ModelList } from "./ModelList";
-import { useState } from "react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import * as THREE from "three";
 import { FontLoader } from "three/examples/jsm/loaders/FontLoader.js";
@@ -28,6 +27,8 @@ import { ThangsEmbed } from "@/components/ThangsEmbed";
 import { ThingiverseEmbed } from "@/components/ThingiverseEmbed";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
 import { FreeModeContext } from "@/pages/FreePage";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { Badge } from "@/components/ui/badge";
 
 // Font options with their display names and paths
 const FONTS = [
@@ -1644,7 +1645,14 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
   return (
     <div className="h-full flex flex-col">
       <div className="p-4 flex items-center justify-between border-b">
-        <h1 className="text-xl font-bold">FishCAD</h1>
+        <div className="flex items-center gap-2">
+          <h1 className="text-xl font-bold">FishCAD</h1>
+          {freeModeCtx?.isFreeMode ? (
+            <Badge variant="outline" className="text-xs bg-muted">Free</Badge>
+          ) : (
+            <Badge variant="outline" className="text-xs bg-primary/10 text-primary">Pro</Badge>
+          )}
+        </div>
         <div className="flex items-center">
           <ThemeToggle className="mr-2" />
           {onClose && (

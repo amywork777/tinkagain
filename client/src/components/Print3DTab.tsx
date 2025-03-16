@@ -744,6 +744,31 @@ const Print3DTab = () => {
     }).format(amount);
   };
 
+  // Function to get the appropriate API URL based on the environment
+  const getApiUrl = (): string => {
+    // Log hostname to debug
+    const hostname = window.location.hostname;
+    console.log(`Current hostname: ${hostname}`);
+    
+    // Check if development
+    if (hostname === 'localhost' || hostname === '127.0.0.1') {
+      return 'http://localhost:3001/api';
+    }
+    
+    // Production environments - fishcad.com
+    if (hostname.includes('fishcad.com')) {
+      console.log('Production environment detected - using fishcad.com');
+      // Use main domain for production
+      return 'https://fishcad.com/api';
+    }
+    
+    // Fallback to environment variable or default
+    const envApiUrl = import.meta.env.VITE_API_URL;
+    const fallback = envApiUrl || 'https://fishcad.com/api';
+    console.log(`Using fallback API URL: ${fallback}`);
+    return fallback;
+  };
+
   // Update the handleCheckout function
   const handleCheckout = async () => {
     console.log("Checkout initiated");
@@ -817,41 +842,71 @@ const Print3DTab = () => {
         stlFileName: checkoutData.stlFileName
       });
       
-      // Use a single endpoint directly
-      const endpoint = '/api/create-checkout-session';
+      // Get the appropriate API URL based on the environment
+      const apiUrl = getApiUrl();
+      const endpoint = `${apiUrl}/create-checkout-session`;
       
-      // Call the checkout endpoint
-      fetch(endpoint, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(checkoutData),
-      })
-      .then(response => {
-        if (!response.ok) {
-          throw new Error(`Server returned ${response.status}: ${response.statusText}`);
+      // Add retry logic to handle potential CORS issues
+      const MAX_RETRIES = 3;
+      const attemptCheckout = async (retryCount = 0) => {
+        try {
+          // Call the checkout endpoint
+          const response = await fetch(endpoint, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(checkoutData),
+          });
+          
+          if (!response.ok) {
+            throw new Error(`Server returned ${response.status}: ${response.statusText}`);
+          }
+          
+          const data = await response.json();
+          
+          if (data.url) {
+            // Redirect to Stripe Checkout
+            console.log("Redirecting to Stripe Checkout:", data.url);
+            window.location.href = data.url;
+          } else {
+            throw new Error("No checkout URL returned from server");
+          }
+        } catch (error) {
+          console.error(`Checkout attempt ${retryCount + 1} failed:`, error);
+          
+          // Retry with a different endpoint format if we have retries left
+          if (retryCount < MAX_RETRIES - 1) {
+            toast({
+              title: "Retrying checkout",
+              description: "Connection issue detected, retrying...",
+              variant: "default",
+            });
+            
+            // Try alternative endpoints on retries
+            if (retryCount === 0) {
+              // Try without /api prefix on first retry
+              const altEndpoint = apiUrl.replace('/api', '') + '/create-checkout-session';
+              return attemptCheckout(retryCount + 1);
+            } else {
+              // Try with www prefix on second retry
+              const wwwEndpoint = apiUrl.replace('https://', 'https://www.') + '/create-checkout-session';
+              return attemptCheckout(retryCount + 1);
+            }
+          } else {
+            // All retries failed
+            toast({
+              title: "Checkout failed",
+              description: error instanceof Error ? error.message : "Failed to create checkout session",
+              variant: "destructive",
+            });
+            setIsLoading(false);
+          }
         }
-        return response.json();
-      })
-      .then(data => {
-        if (data.url) {
-          // Redirect to Stripe Checkout
-          console.log("Redirecting to Stripe Checkout:", data.url);
-          window.location.href = data.url;
-        } else {
-          throw new Error("No checkout URL returned from server");
-        }
-      })
-      .catch(error => {
-        console.error("Checkout error:", error);
-        toast({
-          title: "Checkout failed",
-          description: error.message || "Failed to create checkout session",
-          variant: "destructive",
-        });
-        setIsLoading(false);
-      });
+      };
+      
+      // Start the checkout process with retries
+      attemptCheckout();
     };
     
     try {
@@ -1014,15 +1069,14 @@ const Print3DTab = () => {
 
   // Return the component UI
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       {/* Model selection section */}
       <div className="bg-card rounded-md border p-4">
-        <h2 className="text-lg font-semibold mb-3">Select a Model</h2>
+        <h2 className="text-lg font-medium mb-3">Model</h2>
         
         <div className="space-y-4">
           {/* Model Dropdown */}
           <div>
-            <Label htmlFor="model-select">Choose Model</Label>
             <Select
               value={selectedModelIndex !== null ? selectedModelIndex.toString() : ""}
               onValueChange={(value) => {
@@ -1043,16 +1097,16 @@ const Print3DTab = () => {
                     models.map((model, index) => (
                       <SelectItem key={index} value={index.toString()}>
                         {model.name || `Model ${index + 1}`}
-                    </SelectItem>
-                  ))
-                ) : (
+                      </SelectItem>
+                    ))
+                  ) : (
                     <SelectItem value="no-models" disabled>
                       No models available
                     </SelectItem>
-                )}
+                  )}
                 </SelectGroup>
                 <SelectItem value="upload">
-                  Upload New Model...
+                  Upload New Model
                 </SelectItem>
               </SelectContent>
             </Select>
@@ -1064,30 +1118,30 @@ const Print3DTab = () => {
               <Card className="bg-muted/50">
                 <CardContent className="p-3">
                   <div className="text-sm">
-                    <span className="font-medium">Selected: </span>
+                    <span className="font-medium">Selected:</span>{" "}
                     {models[selectedModelIndex]?.name || `Model ${selectedModelIndex + 1}`}
-            </div>
+                  </div>
                 </CardContent>
               </Card>
             ) : uploadedModelData ? (
               <Card className="bg-muted/50">
                 <CardContent className="p-3">
                   <div className="text-sm">
-                    <span className="font-medium">Uploaded: </span>
+                    <span className="font-medium">Uploaded:</span>{" "}
                     Custom Model
-          </div>
+                  </div>
                 </CardContent>
               </Card>
             ) : (
-            <Button 
-              variant="outline" 
+              <Button 
+                variant="outline" 
                 className="w-full"
                 onClick={handleUploadModel}
-            >
+              >
                 Upload STL Model
-            </Button>
-        )}
-      </div>
+              </Button>
+            )}
+          </div>
           
           {error && (
             <div className="text-sm text-red-500 flex items-center gap-1.5">
@@ -1095,27 +1149,27 @@ const Print3DTab = () => {
               {error}
             </div>
           )}
-            </div>
-          </div>
+        </div>
+      </div>
           
       {/* Filament selection section */}
       <div className="bg-card rounded-md border p-4">
-        <h2 className="text-lg font-semibold mb-3">Select Filament</h2>
+        <h2 className="text-lg font-medium mb-3">Material & Quantity</h2>
         
         <div className="space-y-4">
           <div>
-            <Label htmlFor="filament-select" className="mb-2 block font-semibold">Select PLA Color</Label>
+            <Label htmlFor="filament-select" className="mb-2 block">PLA Color</Label>
             <Select
               value={selectedFilament}
               onValueChange={setSelectedFilament}
             >
               <SelectTrigger className="w-full" id="filament-select">
-                <SelectValue placeholder="Select a material color" />
+                <SelectValue placeholder="Select color" />
               </SelectTrigger>
               <SelectContent>
                 {filamentColors.map((filament) => (
                   <SelectItem key={filament.id} value={filament.id}>
-                    {filament.name} PLA
+                    {filament.name}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -1125,17 +1179,17 @@ const Print3DTab = () => {
           {/* Quantity selector */}
           <div>
             <Label htmlFor="quantity">Quantity</Label>
-              <Input
+            <Input
               id="quantity"
               type="number"
               value={quantity}
               onChange={(e) => setQuantity(Math.max(1, parseInt(e.target.value) || 1))}
               className="w-full"
               min={1}
-              />
-            </div>
+            />
+          </div>
         </div>
-            </div>
+      </div>
             
       {/* Order Summary */}
       <OrderSummary 
@@ -1170,32 +1224,28 @@ const Print3DTab = () => {
           {isPriceCalculating ? (
             <>
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              Calculating...
+              Calculating
             </>
           ) : (
-            <>
-              Recalculate Price
-            </>
+            "Recalculate Price"
           )}
         </Button>
         
-          <Button 
+        <Button 
           onClick={handleCheckout}
           disabled={isLoading || isPriceCalculating || !selectedFilament || (selectedModelIndex === null && !uploadedModelData) || priceSource === 'estimate'}
           className="bg-primary hover:bg-primary/90"
-            >
-              {isLoading ? (
-                <>
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Processing...
-                </>
-              ) : (
+        >
+          {isLoading ? (
             <>
-              Checkout ({formatPrice(finalPrice)})
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              Processing
             </>
-              )}
-            </Button>
-          </div>
+          ) : (
+            `Checkout ${formatPrice(finalPrice)}`
+          )}
+        </Button>
+      </div>
     </div>
   );
 };
