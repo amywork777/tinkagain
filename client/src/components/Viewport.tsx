@@ -140,17 +140,6 @@ export function Viewport() {
       
       <ViewCube />
       
-      {models.length === 0 && (
-        <div className="absolute inset-0 flex items-center justify-center">
-          <div className="text-center bg-background/80 backdrop-blur-sm p-6 rounded-lg max-w-md">
-            <h3 className="text-2xl font-bold mb-2">Your Canvas Awaits</h3>
-            <p className="text-muted-foreground mb-4">
-              Add a shape from the sidebar or import an STL file to get started
-            </p>
-          </div>
-        </div>
-      )}
-      
       {/* Make sure TransformGizmo is the last component added */}
       <TransformGizmo />
     </div>
