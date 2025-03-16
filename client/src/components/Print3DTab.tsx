@@ -8,16 +8,16 @@ import { useToast } from "@/hooks/use-toast";
 import { Separator } from "@/components/ui/separator";
 import { Card, CardContent } from "@/components/ui/card";
 import * as THREE from 'three';
-import { 
-  Printer, 
+import {
+  Printer,
   Loader2,
   AlertCircle,
   X
 } from "lucide-react";
-import { 
-  calculatePrice, 
-  getFilaments, 
-  calculate3DPrintPrice 
+import {
+  calculatePrice,
+  getFilaments,
+  calculate3DPrintPrice
 } from "@/lib/slantApi";
 import { OrderSummary } from './OrderSummary';
 import { FormControl, FormLabel, FormHelperText, FormItem, SimpleForm } from "@/components/ui/form";
@@ -32,19 +32,14 @@ interface FilamentColor {
   id: string;
   name: string;
   hex: string;
+  price: number;
+  imageUrl: string;
+  brand: string;
+  mass: number;
+  link: string;
 }
 
 interface FilamentApiItem {
-  id?: string;
-  name?: string;
-  filament?: string;
-  hex?: string;
-  color?: string;
-  [key: string]: any;
-}
-
-interface Mandarin3DFilament {
-  _id: string;
   filament_id: string;
   filament_brand: string;
   filament_name: string;
@@ -55,9 +50,9 @@ interface Mandarin3DFilament {
   filament_link: string;
 }
 
-interface Mandarin3DResponse {
+interface FilamentApiResponse {
   status: string;
-  result: Mandarin3DFilament[];
+  result: FilamentApiItem[];
 }
 
 // Interface for uploaded model data
@@ -70,14 +65,14 @@ interface UploadedModelData {
 }
 
 // Load Stripe outside of a component's render to avoid recreating the Stripe object on every render
-const stripePromise = import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY 
+const stripePromise = import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY
   ? loadStripe(import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY)
   : loadStripe('pk_live_51QIaT9CLoBz9jXRlVEQ99Q6V4UiRSYy8ZS49MelsW8EfX1mEijh3K5JQEe5iysIL31cGtf2IsTVIyV1mivoUHCUI00aPpz3GMi'); // Fallback key
 
 const Print3DTab = () => {
   const { models, selectedModelIndex, exportSelectedModelAsSTL, selectModel } = useScene();
   const { toast } = useToast();
-  
+
   // State variables
   const [selectedFilament, setSelectedFilament] = useState<string>("");
   const [filamentColors, setFilamentColors] = useState<FilamentColor[]>([]);
@@ -108,100 +103,72 @@ const Print3DTab = () => {
   const [uploadedModelData, setUploadedModelData] = useState<UploadedModelData | string | null>(null);
   const [connectionAttempts, setConnectionAttempts] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
-  
+
   // Fetch filaments when component mounts
   useEffect(() => {
     fetchFilaments();
   }, []);
-  
+
   // Initialize with price calculation when a model is selected
   useEffect(() => {
     if ((selectedModelIndex !== null || uploadedModelData) && selectedFilament) {
       calculatePriceFromAPI();
     }
   }, [selectedModelIndex, uploadedModelData, selectedFilament, quantity]);
-  
+
   // Effect to ensure prices are recalculated when the model changes
   useEffect(() => {
     // Reset saved pricing when model is changed
     setPriceSource('estimate');
     setConnectionAttempts(0);
-    
+
     if ((selectedModelIndex !== null || uploadedModelData) && selectedFilament) {
       calculatePriceFromAPI();
     }
   }, [selectedModelIndex, uploadedModelData]);
-  
+
   // Effect for recalculation when filament or quantity changes
   useEffect(() => {
     if ((selectedModelIndex !== null || uploadedModelData) && selectedFilament) {
       calculatePriceFromAPI();
     }
   }, [selectedFilament, quantity]);
-  
+
   // Fetch filaments from the API
   const fetchFilaments = async () => {
     setIsLoading(true);
     try {
-      // Fetch filaments from Mandarin3D API
-      const response = await fetch('https://backend.mandarin3d.com/api/filaments', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          action: 'list'
-        })
-      });
+      const response = await fetch('https://backend.mandarin3d.com/api/filament?action=list')
+      console.log('Filament API response:', response);
 
-      const data = await response.json() as Mandarin3DResponse;
-      console.log('Filament API response:', data);
-      
-      // Check if we have a successful response with results
-      if (data.status === 'success' && Array.isArray(data.result)) {
-        const colors = data.result.map((item: Mandarin3DFilament) => ({
-          id: item.filament_id,
-          name: `${item.filament_brand} ${item.filament_name}`.replace(/\bPLA\b/gi, '').trim(),
-          hex: item.filament_color || '#808080',
-          price: item.filament_unit_price,
-          imageUrl: item.filament_image_url,
-          brand: item.filament_brand,
-          mass: item.filament_mass_in_grams,
-          link: item.filament_link
-        }));
+      const responseData = await response.json() as FilamentApiResponse;
+      let colors: FilamentColor[] = [];
 
-        console.log('Normalized filament colors:', colors);
-        
-        if (colors.length > 0) {
-          setFilamentColors(colors);
-          setSelectedFilament(colors[0].id);
-          return;
-        }
+      if (responseData.status === "success" && Array.isArray(responseData.result)) {
+        colors = responseData.result.map((item: FilamentApiItem) => {
+          // Clean the name to remove any redundancy
+          let name = item.filament_name.replace(/\bPLA\b/gi, '').trim();
+          name = name.replace(/^[\s-]+|[\s-]+$/g, '');
+
+          return {
+            id: item.filament_id,
+            name: name || 'Unknown Color',
+            hex: item.filament_color || '#808080',
+            price: item.filament_unit_price,
+            imageUrl: item.filament_image_url,
+            brand: item.filament_brand,
+            mass: item.filament_mass_in_grams,
+            link: item.filament_link
+          };
+        });
       }
 
-      // If we get here, either the API call failed or returned no colors
-      // Use fallback colors
-      const fallbackColors = [
-        { id: 'black-pla', name: 'Black', hex: '#121212' },
-        { id: 'white-pla', name: 'White', hex: '#f9f9f9' },
-        { id: 'gray-pla', name: 'Gray', hex: '#9e9e9e' },
-        { id: 'red-pla', name: 'Red', hex: '#f44336' },
-        { id: 'blue-pla', name: 'Royal Blue', hex: '#1976d2' },
-        { id: 'green-pla', name: 'Forest Green', hex: '#2e7d32' },
-        { id: 'yellow-pla', name: 'Bright Yellow', hex: '#fbc02d' },
-        { id: 'orange-pla', name: 'Orange', hex: '#ff9800' },
-        { id: 'purple-pla', name: 'Purple', hex: '#7b1fa2' },
-        { id: 'pink-pla', name: 'Hot Pink', hex: '#e91e63' },
-        { id: 'teal-pla', name: 'Teal', hex: '#009688' },
-        { id: 'silver-pla', name: 'Silver Metallic', hex: '#b0bec5' },
-        { id: 'gold-pla', name: 'Gold Metallic', hex: '#ffd700' },
-        { id: 'bronze-pla', name: 'Bronze Metallic', hex: '#cd7f32' },
-        { id: 'glow-pla', name: 'Glow-in-the-Dark', hex: '#c6ff00' }
-      ];
-      
-      setFilamentColors(fallbackColors);
-      setSelectedFilament(fallbackColors[0].id);
-      
+      console.log('Normalized filament colors:', colors);
+
+      setFilamentColors(colors);
+      if (colors.length > 0) {
+        setSelectedFilament(colors[0].id);
+      }
     } catch (err) {
       console.error('Error fetching filaments:', err);
       toast({
@@ -209,28 +176,28 @@ const Print3DTab = () => {
         description: "Using default color options",
         variant: "destructive",
       });
-      
+
       // Use fallback colors on error
-      const fallbackColors = [
-        { id: 'black-pla', name: 'Black', hex: '#121212' },
-        { id: 'white-pla', name: 'White', hex: '#f9f9f9' },
-        { id: 'gray-pla', name: 'Gray', hex: '#9e9e9e' },
-        { id: 'red-pla', name: 'Red', hex: '#f44336' },
-        { id: 'blue-pla', name: 'Royal Blue', hex: '#1976d2' },
-        { id: 'green-pla', name: 'Forest Green', hex: '#2e7d32' },
-        { id: 'yellow-pla', name: 'Bright Yellow', hex: '#fbc02d' },
-        { id: 'orange-pla', name: 'Orange', hex: '#ff9800' },
-        { id: 'purple-pla', name: 'Purple', hex: '#7b1fa2' },
-        { id: 'pink-pla', name: 'Hot Pink', hex: '#e91e63' }
+      const fallbackColors: FilamentColor[] = [
+        { id: 'black-pla', name: 'Black', hex: '#121212', price: 24.99, imageUrl: '', brand: 'Generic', mass: 1000, link: '' },
+        { id: 'white-pla', name: 'White', hex: '#f9f9f9', price: 24.99, imageUrl: '', brand: 'Generic', mass: 1000, link: '' },
+        { id: 'gray-pla', name: 'Gray', hex: '#9e9e9e', price: 24.99, imageUrl: '', brand: 'Generic', mass: 1000, link: '' },
+        { id: 'red-pla', name: 'Red', hex: '#f44336', price: 24.99, imageUrl: '', brand: 'Generic', mass: 1000, link: '' },
+        { id: 'blue-pla', name: 'Royal Blue', hex: '#1976d2', price: 24.99, imageUrl: '', brand: 'Generic', mass: 1000, link: '' },
+        { id: 'green-pla', name: 'Forest Green', hex: '#2e7d32', price: 24.99, imageUrl: '', brand: 'Generic', mass: 1000, link: '' },
+        { id: 'yellow-pla', name: 'Bright Yellow', hex: '#fbc02d', price: 24.99, imageUrl: '', brand: 'Generic', mass: 1000, link: '' },
+        { id: 'orange-pla', name: 'Orange', hex: '#ff9800', price: 24.99, imageUrl: '', brand: 'Generic', mass: 1000, link: '' },
+        { id: 'purple-pla', name: 'Purple', hex: '#7b1fa2', price: 24.99, imageUrl: '', brand: 'Generic', mass: 1000, link: '' },
+        { id: 'pink-pla', name: 'Hot Pink', hex: '#e91e63', price: 24.99, imageUrl: '', brand: 'Generic', mass: 1000, link: '' }
       ];
-      
+
       setFilamentColors(fallbackColors);
       setSelectedFilament(fallbackColors[0].id);
     } finally {
       setIsLoading(false);
     }
   };
-  
+
   // Function to calculate the price using our advanced algorithm
   const calculatePriceFromAPI = async () => {
     if ((selectedModelIndex === null && !uploadedModelData) || !selectedFilament) {
@@ -241,17 +208,17 @@ const Print3DTab = () => {
       });
       return;
     }
-    
+
     console.log('Starting price calculation');
     setIsPriceCalculating(true);
     setError(null);
     setPriceSource('estimate'); // Default to estimate until calculation succeeds
-    
+
     // Set reasonable fallback prices that scale with quantity
     const calculateFallbackPrices = () => {
       // Base price formula: More gradual scaling based on quantity with 20% increase
       let basePriceFallback;
-      
+
       if (quantity === 1) {
         basePriceFallback = 6; // Single item (previously 5, now with 20% markup)
       } else if (quantity <= 5) {
@@ -261,17 +228,17 @@ const Print3DTab = () => {
       } else {
         basePriceFallback = 36 + (quantity - 10) * 2.4; // $36 + $2.40 per additional after 10
       }
-      
+
       // For backend compatibility, still calculate material and printing costs
       const materialCostFallback = basePriceFallback * 0.4;
       const printingCostFallback = basePriceFallback * 0.6;
-      
+
       // Shipping cost varies based on order size
       const shippingCostFallback = basePriceFallback > 50 ? 10.00 : 5.00;
-      
+
       // Calculate total price 
       const totalPriceFallback = basePriceFallback + shippingCostFallback;
-      
+
       console.log('Using fallback prices:', {
         basePriceFallback,
         materialCostFallback,
@@ -279,7 +246,7 @@ const Print3DTab = () => {
         shippingCostFallback,
         totalPriceFallback
       });
-      
+
       return {
         basePrice: basePriceFallback,
         materialCost: materialCostFallback,
@@ -288,22 +255,22 @@ const Print3DTab = () => {
         totalPrice: totalPriceFallback
       };
     };
-    
+
     // Get fallback prices as a starting point
     const fallbackPrices = calculateFallbackPrices();
-    
+
     // Set fallback values right away so UI always shows something
     setBasePrice(fallbackPrices.basePrice);
     setMaterialCost(fallbackPrices.materialCost);
     setPrintingCost(fallbackPrices.printingCost);
     setShippingCost(fallbackPrices.shippingCost);
     setFinalPrice(fallbackPrices.totalPrice);
-    
+
     toast({
       title: "Calculating price...",
       description: "Analyzing model geometry and materials",
     });
-    
+
     try {
       // Calculate price based on model volume
       if (selectedModelIndex !== null && selectedModelIndex >= 0 && selectedModelIndex < models.length) {
@@ -311,24 +278,24 @@ const Print3DTab = () => {
         const model = models[selectedModelIndex];
         if (model && model.mesh) {
           console.log('Calculating price for model:', model.name);
-          
+
           // Calculate model volume
           const modelVolume = calculateModelVolume(model);
           console.log('Calculated model volume:', modelVolume, 'cubic mm');
-          
+
           // Calculate model complexity (polygon count, geometry details)
           const complexityFactor = calculateModelComplexity(model);
           console.log('Model complexity factor:', complexityFactor);
-          
+
           // Assess model printability (overhangs, thin walls, etc.)
           const printabilityAssessment = assessPrintability(model);
           setPrintability(printabilityAssessment);
           console.log('Model printability:', printabilityAssessment);
-          
+
           // Revised pricing model without artificial caps
           // Base prices depend on volume
           const volumeCubicCm = modelVolume / 1000; // Convert to cubic cm
-          
+
           let basePrice;
           if (volumeCubicCm < 5) {
             basePrice = 2; // Minimum price
@@ -336,77 +303,77 @@ const Print3DTab = () => {
             basePrice = 2 + ((volumeCubicCm - 5) / 45) * 3; // $2-$5
           } else if (volumeCubicCm < 200) {
             basePrice = 5 + ((volumeCubicCm - 50) / 150) * 5; // $5-$10
-      } else {
+          } else {
             // For extremely large models, continue scaling (approximately $15 per 1000 cubic cm)
             basePrice = 100 + ((volumeCubicCm - 5000) / 1000) * 15;
           }
-          
+
           // No price cap - allow prices to reflect actual material and time costs
-          
+
           // Calculate size in inches (assuming cubic root of volume, converted from cm to inches)
-          const sizeInInches = Math.pow(volumeCubicCm, 1/3) / 2.54; 
+          const sizeInInches = Math.pow(volumeCubicCm, 1 / 3) / 2.54;
           console.log(`Approximate model size: ${sizeInInches.toFixed(1)} inches`);
-          
+
           // Apply complexity factor to base price
           // Complex models take longer to print and have higher failure rates
           const complexityAdjustedBasePrice = basePrice * complexityFactor;
           console.log('Complexity-adjusted base price:', complexityAdjustedBasePrice.toFixed(2));
-          
+
           // Apply printability factor to the price
           // Hard-to-print models require more supports, have higher failure rates, etc.
           const printabilityAdjustedBasePrice = complexityAdjustedBasePrice * printabilityAssessment.factor;
           console.log('Printability-adjusted base price:', printabilityAdjustedBasePrice.toFixed(2));
-          
+
           // Apply material pricing factor based on selected filament
           // Premium materials cost more
           let materialFactor = 1.0; // Default for standard materials
-          if (selectedFilament.includes('Premium') || 
-              selectedFilament.includes('Metallic') || 
-              selectedFilament.includes('Wood')) {
+          if (selectedFilament.includes('Premium') ||
+            selectedFilament.includes('Metallic') ||
+            selectedFilament.includes('Wood')) {
             materialFactor = 1.25; // 25% premium for specialty materials
           }
-          
+
           const materialAdjustedBasePrice = printabilityAdjustedBasePrice * materialFactor;
           console.log('Material-adjusted base price:', materialAdjustedBasePrice.toFixed(2));
-          
+
           // Apply quantity discount
           let quantityFactor = 1.0;
           if (quantity > 1) {
             // First item is full price, additional items get progressively cheaper
             const firstItemPrice = materialAdjustedBasePrice;
             let additionalItemsPrice = 0;
-            
+
             // Apply progressive discounts
             for (let i = 1; i < quantity; i++) {
               // Each subsequent item gets cheaper (up to 40% off)
               const discount = Math.min(0.40, 0.15 + (i * 0.025));
               additionalItemsPrice += materialAdjustedBasePrice * (1 - discount);
             }
-            
+
             const totalBeforeShipping = firstItemPrice + additionalItemsPrice;
             const effectiveUnitPrice = totalBeforeShipping / quantity;
-            
+
             // Calculate equivalent quantity factor
             quantityFactor = effectiveUnitPrice / materialAdjustedBasePrice * quantity;
-            
+
             console.log(`Quantity ${quantity}: equivalent factor ${quantityFactor.toFixed(2)}`);
           }
-          
+
           const quantityAdjustedBasePrice = materialAdjustedBasePrice * quantityFactor;
           console.log('Quantity-adjusted total price:', quantityAdjustedBasePrice.toFixed(2));
-          
+
           // Shipping calculation - base fee plus per-item cost, with volume consideration
           const shippingBase = 5.00;
           const shippingPerItem = 0.50;
           const volumeFactor = Math.min(3.0, Math.max(1.0, volumeCubicCm / 200));
-          
+
           const shipping = (shippingBase + (shippingPerItem * quantity)) * volumeFactor;
           console.log('Shipping cost:', shipping.toFixed(2));
-          
+
           // Final price component breakdown
           const materialCost = quantityAdjustedBasePrice * 0.4; // 40% of base for materials
           const printingCost = quantityAdjustedBasePrice * 0.6; // 60% of base for printing process
-          
+
           // Set state with calculated values
           setBasePrice(Number(quantityAdjustedBasePrice.toFixed(2)));
           setMaterialCost(Number(materialCost.toFixed(2)));
@@ -415,7 +382,7 @@ const Print3DTab = () => {
           setFinalPrice(Number((quantityAdjustedBasePrice + shipping).toFixed(2)));
           setComplexityFactor(complexityFactor);
           setPriceSource('api');
-          
+
           console.log('Price calculation complete:', {
             basePrice: quantityAdjustedBasePrice.toFixed(2),
             materialCost: materialCost.toFixed(2),
@@ -423,7 +390,7 @@ const Print3DTab = () => {
             shipping: shipping.toFixed(2),
             finalPrice: (quantityAdjustedBasePrice + shipping).toFixed(2)
           });
-          
+
           toast({
             title: "Price calculated",
             description: "Based on model geometry, complexity, and material",
@@ -439,19 +406,19 @@ const Print3DTab = () => {
         } else if (uploadedModelData instanceof ArrayBuffer) {
           modelDataSize = uploadedModelData.byteLength;
         }
-        
+
         // Rough estimate - larger files generally mean more complex/larger models
         const estimatedVolume = modelDataSize / 50; // Very rough approximation
         console.log('Estimated volume from data size:', estimatedVolume);
-        
+
         // Use more aggressive fallback prices for uploaded models since we have less info
         const basePrice = fallbackPrices.basePrice * 1.2; // 20% higher due to unknown geometry
-        
+
         setBasePrice(Number(basePrice.toFixed(2)));
         setMaterialCost(Number((basePrice * 0.4).toFixed(2)));
         setPrintingCost(Number((basePrice * 0.6).toFixed(2)));
         setFinalPrice(Number((basePrice + fallbackPrices.shippingCost).toFixed(2)));
-        
+
         toast({
           title: "Estimated price calculated",
           description: "Based on limited information from uploaded model",
@@ -461,7 +428,7 @@ const Print3DTab = () => {
     } catch (error) {
       console.error('Error calculating price:', error);
       setError('Failed to calculate accurate price. Using estimates.');
-      
+
       toast({
         title: "Using estimated pricing",
         description: "Could not analyze model in detail. Using size-based estimates.",
@@ -479,25 +446,25 @@ const Print3DTab = () => {
         console.error('Invalid model for volume calculation');
         return 0;
       }
-      
+
       // Make sure the model's geometry is up to date
       model.mesh.updateMatrixWorld(true);
-      
+
       if (model.mesh.geometry) {
         // Clone the geometry to avoid modifying the original
         const geometry = model.mesh.geometry.clone();
-        
+
         // Apply the model's transformation to the geometry
         geometry.applyMatrix4(model.mesh.matrixWorld);
-        
+
         // Compute the volume
         if (geometry.isBufferGeometry) {
           // For buffer geometry, we need to compute volume from vertices and faces
           const position = geometry.getAttribute('position');
           const index = geometry.getIndex();
-          
+
           let volume = 0;
-          
+
           // If we have an indexed geometry
           if (index) {
             for (let i = 0; i < index.count; i += 3) {
@@ -507,16 +474,16 @@ const Print3DTab = () => {
                 position.getZ(index.getX(i))
               );
               const b = new THREE.Vector3(
-                position.getX(index.getX(i+1)),
-                position.getY(index.getX(i+1)),
-                position.getZ(index.getX(i+1))
+                position.getX(index.getX(i + 1)),
+                position.getY(index.getX(i + 1)),
+                position.getZ(index.getX(i + 1))
               );
               const c = new THREE.Vector3(
-                position.getX(index.getX(i+2)),
-                position.getY(index.getX(i+2)),
-                position.getZ(index.getX(i+2))
+                position.getX(index.getX(i + 2)),
+                position.getY(index.getX(i + 2)),
+                position.getZ(index.getX(i + 2))
               );
-              
+
               // Calculate signed volume of tetrahedron formed by triangle and origin
               const tetraVolume = (a.dot(b.cross(c))) / 6;
               volume += Math.abs(tetraVolume);
@@ -530,33 +497,33 @@ const Print3DTab = () => {
                 position.getZ(i)
               );
               const b = new THREE.Vector3(
-                position.getX(i+1),
-                position.getY(i+1),
-                position.getZ(i+1)
+                position.getX(i + 1),
+                position.getY(i + 1),
+                position.getZ(i + 1)
               );
               const c = new THREE.Vector3(
-                position.getX(i+2),
-                position.getY(i+2),
-                position.getZ(i+2)
+                position.getX(i + 2),
+                position.getY(i + 2),
+                position.getZ(i + 2)
               );
-              
+
               // Calculate signed volume of tetrahedron formed by triangle and origin
               const tetraVolume = (a.dot(b.cross(c))) / 6;
               volume += Math.abs(tetraVolume);
             }
           }
-          
+
           // Return volume in cubic millimeters with reasonable bounds
           // Ensure volume is at least 1 cubic cm (1000 cubic mm) for minimum price
           return Math.max(1000, volume);
         }
       }
-      
+
       // Fallback - use bounding box volume
       const boundingBox = new THREE.Box3().setFromObject(model.mesh);
-    const size = new THREE.Vector3();
+      const size = new THREE.Vector3();
       boundingBox.getSize(size);
-      
+
       // Return volume in cubic millimeters with reasonable bounds
       return Math.max(1000, size.x * size.y * size.z);
     } catch (error) {
@@ -564,16 +531,16 @@ const Print3DTab = () => {
       return 1000; // Fallback value: 1 cubic cm
     }
   };
-  
+
   // Calculate a complexity factor for the model based on geometry
   const calculateModelComplexity = (model: any) => {
     try {
       if (!model || !model.mesh || !model.mesh.geometry) {
         return 1.0; // Default complexity factor
       }
-      
+
       const geometry = model.mesh.geometry;
-      
+
       // Get face count as measure of complexity
       let faceCount = 0;
       if (geometry.index) {
@@ -582,13 +549,13 @@ const Print3DTab = () => {
         const position = geometry.getAttribute('position');
         faceCount = position.count / 3;
       }
-      
+
       // Calculate normalized complexity factor
       // Simple models: <1000 faces
       // Medium complexity: 1000-10,000 faces
       // Complex models: 10,000-100,000 faces
       // Very complex models: >100,000 faces
-      
+
       let complexityFactor;
       if (faceCount < 1000) {
         complexityFactor = 1.0; // Normal pricing for simple models
@@ -599,7 +566,7 @@ const Print3DTab = () => {
       } else {
         complexityFactor = 1.5 + Math.min(0.5, ((faceCount - 100000) / 900000) * 0.5); // Up to 100% more for very complex models
       }
-      
+
       console.log(`Model complexity: ${faceCount} faces, factor: ${complexityFactor.toFixed(2)}`);
       return complexityFactor;
     } catch (error) {
@@ -607,7 +574,7 @@ const Print3DTab = () => {
       return 1.0; // Default complexity factor
     }
   };
-  
+
   // Assess the printability of a model
   const assessPrintability = (model: any) => {
     try {
@@ -620,49 +587,49 @@ const Print3DTab = () => {
           hasFloatingIslands: false
         };
       }
-      
+
       // Get the geometry
       const geometry = model.mesh.geometry;
       const position = geometry.getAttribute('position');
-      
+
       // Calculate the bounding box
       const bbox = new THREE.Box3().setFromBufferAttribute(position);
       const dimensions = new THREE.Vector3();
       bbox.getSize(dimensions);
-      
+
       // Look for potential overhangs (negative Z-normals if upward is Z)
       let hasOverhangs = false;
       let hasThinWalls = false;
       let hasFloatingIslands = false;
-      
+
       // Check for overhangs using normals
       if (geometry.getAttribute('normal')) {
         const normals = geometry.getAttribute('normal');
         let downwardNormalCount = 0;
-        
+
         for (let i = 0; i < normals.count; i++) {
           const z = normals.getZ(i);
           if (z < -0.7) { // Steep downward normal
             downwardNormalCount++;
           }
         }
-        
+
         // If more than 10% of normals point downward, consider it has overhangs
         hasOverhangs = downwardNormalCount > normals.count * 0.1;
       }
-      
+
       // Simple heuristic for thin walls - if any dimension is much smaller than others
       const minDimension = Math.min(dimensions.x, dimensions.y, dimensions.z);
       const maxDimension = Math.max(dimensions.x, dimensions.y, dimensions.z);
       hasThinWalls = minDimension < maxDimension * 0.05;
-      
+
       // We can't reliably detect floating islands without more complex analysis
       hasFloatingIslands = false; // Simplified assumption
-      
+
       // Determine printability category and factor
       let category = "Easy";
       let factor = 1.0;
-      
+
       if (hasOverhangs && hasThinWalls) {
         category = "Difficult";
         factor = 1.5; // 50% price increase for difficult prints
@@ -670,7 +637,7 @@ const Print3DTab = () => {
         category = "Moderate";
         factor = 1.25; // 25% price increase for moderately difficult prints
       }
-      
+
       return {
         factor,
         category,
@@ -697,16 +664,16 @@ const Print3DTab = () => {
       const fileInput = document.createElement('input');
       fileInput.type = 'file';
       fileInput.accept = '.stl';
-      
+
       // Handle file selection
       fileInput.onchange = async (e) => {
         const target = e.target as HTMLInputElement;
         if (target && target.files && target.files[0]) {
           const file = target.files[0];
-          
+
           // Store the original filename
           const originalFileName = file.name;
-          
+
           // Convert file to base64 for model preview and API use
           const reader = new FileReader();
           reader.onload = async (event) => {
@@ -719,12 +686,12 @@ const Print3DTab = () => {
                 fileType: file.type,
                 uploadTime: new Date().toISOString()
               });
-              
+
               toast({
                 title: "Model uploaded successfully",
                 description: `${originalFileName} (${Math.round(file.size / 1024)}KB)`,
               });
-              
+
               // Calculate price for the uploaded model
               await calculatePriceFromAPI();
             }
@@ -732,7 +699,7 @@ const Print3DTab = () => {
           reader.readAsDataURL(file);
         }
       };
-      
+
       // Trigger the file selection dialog
       fileInput.click();
     } catch (error) {
@@ -760,25 +727,25 @@ const Print3DTab = () => {
     // Log hostname to debug
     const hostname = window.location.hostname;
     console.log(`Current hostname: ${hostname}`);
-    
+
     // Check if development
     if (hostname === 'localhost' || hostname === '127.0.0.1') {
       return 'http://localhost:3001/api';
     }
-    
+
     // Production environments - Taiyaki 3DCAD
     if (hostname.includes('3dcad.taiyaki.ai')) {
       console.log('Production environment detected - using 3dcad.taiyaki.ai');
       // Use main domain for production
       return 'https://3dcad.taiyaki.ai/api';
     }
-    
+
     // Legacy production environments - fishcad.com
     if (hostname.includes('fishcad.com')) {
       console.log('Legacy environment detected - using fishcad.com');
       return 'https://fishcad.com/api';
     }
-    
+
     // Fallback to environment variable or default
     const envApiUrl = import.meta.env.VITE_API_URL;
     // Update the fallback to use the new domain
@@ -790,7 +757,7 @@ const Print3DTab = () => {
   // Enhanced checkout function with better error handling and retries
   const handleCheckout = async () => {
     console.log(`[${new Date().toISOString()}] CHECKOUT STARTED: 3D Print Checkout initiated`);
-    
+
     // Validate required fields
     if (selectedModelIndex === null && !uploadedModelData) {
       console.error(`[${new Date().toISOString()}] CHECKOUT ERROR: No model selected`);
@@ -801,11 +768,11 @@ const Print3DTab = () => {
       });
       return;
     }
-    
+
     // Check if we have a selected model or an uploaded model
     const hasSelectedPredefinedModel = selectedModelIndex !== null && selectedModelIndex !== -1;
     const hasUploadedModel = uploadedModelData !== null;
-    
+
     if (!hasSelectedPredefinedModel && !hasUploadedModel) {
       console.error(`[${new Date().toISOString()}] CHECKOUT ERROR: No valid model found`);
       toast({
@@ -815,7 +782,7 @@ const Print3DTab = () => {
       });
       return;
     }
-    
+
     // Check for required filament selection
     if (!selectedFilament) {
       console.error(`[${new Date().toISOString()}] CHECKOUT ERROR: No filament selected`);
@@ -826,28 +793,28 @@ const Print3DTab = () => {
       });
       return;
     }
-    
+
     console.log(`[${new Date().toISOString()}] CHECKOUT STATUS: All validation passed, proceeding with checkout`);
-    
+
     // Set loading state
     setIsLoading(true);
-    
+
     toast({
       title: "Preparing checkout",
       description: "Processing your 3D print order...",
     });
-    
+
     // Define variables here to be accessible in the helper function
     let modelName: string = "Unknown Model";
     let stlFileName: string = "unknown_model.stl";
     let stlFileData: string | null = null;
-    
+
     // Helper function to continue with checkout after STL export
     const continueCheckoutProcess = () => {
       // Get the color name from the selected filament
       const selectedColor = filamentColors.find(color => color.id === selectedFilament);
       const colorName = selectedColor ? selectedColor.name : "Unknown Color";
-      
+
       // Prepare the checkout data
       const checkoutData = {
         modelName,
@@ -860,7 +827,7 @@ const Print3DTab = () => {
         stlFileName,
         stlFileData // Send the STL data for the server to store
       };
-      
+
       console.log(`[${new Date().toISOString()}] CHECKOUT DATA PREPARED:`, {
         modelName: checkoutData.modelName,
         color: checkoutData.color,
@@ -872,53 +839,53 @@ const Print3DTab = () => {
         type: checkoutData.type,
         timestamp: new Date().toISOString()
       });
-      
+
       // Get the appropriate API URL based on the environment
       const apiUrl = getApiUrl();
       console.log(`[${new Date().toISOString()}] CHECKOUT API URL: ${apiUrl}`);
-      
+
       // Define possible endpoint patterns to try
       const domainBase = window.location.origin;
       const possibleEndpoints = [
         // Debug endpoint - try first to verify connectivity
         `${domainBase}/api/debug-checkout`,
-        
+
         // Primary endpoints - simplified to try the most likely ones first
         `${domainBase}/api/checkout`,
         `${apiUrl}/checkout`,
-        
+
         // Alternative endpoints
         `${domainBase}/api/create-checkout-session`,
         `${apiUrl}/create-checkout-session`,
-        
+
         // Fallback endpoints
         `${domainBase}/api/print/create-checkout-session`,
         `${apiUrl}/print/create-checkout-session`,
       ];
-      
+
       // Function to try each endpoint in sequence
       const tryEndpoints = async (index = 0) => {
         if (index >= possibleEndpoints.length) {
           console.error(`[${new Date().toISOString()}] CHECKOUT ERROR: All endpoints failed`);
-          
+
           toast({
             title: "Checkout failed",
             description: "Could not connect to checkout service. Please try again later.",
             variant: "destructive",
           });
-          
+
           setIsLoading(false);
           return;
         }
-        
+
         const endpoint = possibleEndpoints[index];
         console.log(`[${new Date().toISOString()}] CHECKOUT ATTEMPT ${index + 1}/${possibleEndpoints.length}: Trying endpoint: ${endpoint}`);
-        
+
         try {
           // Add cache-busting parameter to avoid cached responses
           const cacheBuster = `?_=${Date.now()}`;
           const endpointWithCache = `${endpoint}${cacheBuster}`;
-          
+
           // Send the checkout request
           const response = await fetch(endpointWithCache, {
             method: 'POST',
@@ -934,35 +901,35 @@ const Print3DTab = () => {
               clientTimestamp: new Date().toISOString()
             })
           });
-          
+
           console.log(`[${new Date().toISOString()}] CHECKOUT RESPONSE STATUS: ${response.status} from endpoint ${endpoint}`);
-          
+
           // Handle non-success responses
           if (!response.ok) {
             const errorText = await response.text();
             console.error(`[${new Date().toISOString()}] CHECKOUT ERROR RESPONSE: ${errorText}`);
-            
+
             // If we got a server error (5xx), try the next endpoint
             if (response.status >= 500) {
               console.log(`[${new Date().toISOString()}] CHECKOUT RETRY: Server error, trying next endpoint`);
               return tryEndpoints(index + 1);
             }
-            
+
             // For client errors (4xx), show the error
             toast({
               title: "Checkout error",
               description: `Server error: ${response.status}. Please try again.`,
               variant: "destructive",
             });
-            
+
             setIsLoading(false);
             return;
           }
-          
+
           // Parse the response
           const data = await response.json();
           console.log(`[${new Date().toISOString()}] CHECKOUT SUCCESS RESPONSE:`, data);
-          
+
           // Check if we have a checkout URL
           if (data.url) {
             console.log(`[${new Date().toISOString()}] CHECKOUT REDIRECT: Redirecting to: ${data.url}`);
@@ -979,34 +946,34 @@ const Print3DTab = () => {
           }
         } catch (error) {
           console.error(`[${new Date().toISOString()}] CHECKOUT FETCH ERROR:`, error);
-          
+
           // Try the next endpoint
           console.log(`[${new Date().toISOString()}] CHECKOUT RETRY: Fetch error, trying next endpoint`);
           return tryEndpoints(index + 1);
         }
       };
-      
+
       // Start trying endpoints
       tryEndpoints();
     };
-    
+
     try {
       console.log(`[${new Date().toISOString()}] CHECKOUT PROCESSING: Preparing STL data`);
-      
+
       if (hasSelectedPredefinedModel && models) {
         // We're using a predefined model from the scene
         const model = models[selectedModelIndex];
         modelName = model.name;
         stlFileName = `${model.name.toLowerCase().replace(/\s+/g, '_')}.stl`;
-        
+
         console.log(`[${new Date().toISOString()}] CHECKOUT MODEL: Selected predefined model: ${modelName}`);
-        
+
         // For predefined models, we need to export the STL
         try {
           // Export the selected model to STL format (returns a Blob)
           const stlBlob = exportSelectedModelAsSTL();
           console.log(`[${new Date().toISOString()}] CHECKOUT STL EXPORT: STL export successful, blob size: ${stlBlob?.size || 'unknown'} bytes`);
-          
+
           if (stlBlob && stlBlob instanceof Blob) {
             // Create a FileReader to convert Blob to ArrayBuffer
             const reader = new FileReader();
@@ -1020,12 +987,12 @@ const Print3DTab = () => {
                   binary += String.fromCharCode(bytes[i]);
                 }
                 const base64 = window.btoa(binary);
-                
+
                 // Set the STL file data as a base64 string
                 stlFileData = `data:application/octet-stream;base64,${base64}`;
-                
+
                 console.log(`[${new Date().toISOString()}] CHECKOUT STL DATA: Exported STL data for ${modelName}, base64 length: ${stlFileData.length} characters`);
-                
+
                 // Continue with checkout process
                 continueCheckoutProcess();
               } else {
@@ -1038,7 +1005,7 @@ const Print3DTab = () => {
                 setIsLoading(false);
               }
             };
-            
+
             // Add error handler for FileReader
             reader.onerror = (event) => {
               console.error(`[${new Date().toISOString()}] CHECKOUT ERROR: FileReader error:`, reader.error);
@@ -1049,10 +1016,10 @@ const Print3DTab = () => {
               });
               setIsLoading(false);
             };
-            
+
             // Start reading the blob as ArrayBuffer
             reader.readAsArrayBuffer(stlBlob);
-            
+
             // Return here - the checkout will continue asynchronously after the file is read
             return;
           } else {
@@ -1078,15 +1045,15 @@ const Print3DTab = () => {
       } else if (hasUploadedModel && uploadedModelData) {
         // We're using an uploaded model
         modelName = "Uploaded Model";
-        stlFileName = typeof uploadedModelData === 'object' && 'fileName' in uploadedModelData 
+        stlFileName = typeof uploadedModelData === 'object' && 'fileName' in uploadedModelData
           ? uploadedModelData.fileName || "uploaded_model.stl"
           : "uploaded_model.stl";
-        
+
         console.log(`[${new Date().toISOString()}] CHECKOUT MODEL: Using uploaded model: ${stlFileName}`);
-        
+
         // Check if we need to convert the uploaded model data
-        if (typeof uploadedModelData === 'object' && 'fileData' in uploadedModelData && 
-            uploadedModelData.fileData && typeof uploadedModelData.fileData === 'string') {
+        if (typeof uploadedModelData === 'object' && 'fileData' in uploadedModelData &&
+          uploadedModelData.fileData && typeof uploadedModelData.fileData === 'string') {
           // If the data is already a string (likely a data URL), use it directly
           stlFileData = uploadedModelData.fileData;
           console.log(`[${new Date().toISOString()}] CHECKOUT STL DATA: Using uploaded STL data, length: ${stlFileData.length} characters`);
@@ -1095,7 +1062,7 @@ const Print3DTab = () => {
         } else if (typeof uploadedModelData === 'object' && 'blob' in uploadedModelData && uploadedModelData.blob instanceof Blob) {
           // If we have a blob, convert it to a data URL
           console.log(`[${new Date().toISOString()}] CHECKOUT STL PROCESSING: Converting uploaded blob to base64`);
-          
+
           const reader = new FileReader();
           reader.onload = (event) => {
             if (event.target?.result) {
@@ -1112,7 +1079,7 @@ const Print3DTab = () => {
               setIsLoading(false);
             }
           };
-          
+
           reader.onerror = () => {
             console.error(`[${new Date().toISOString()}] CHECKOUT ERROR: FileReader error for uploaded blob:`, reader.error);
             toast({
@@ -1122,7 +1089,7 @@ const Print3DTab = () => {
             });
             setIsLoading(false);
           };
-          
+
           reader.readAsDataURL(uploadedModelData.blob);
           return;
         } else if (!stlFileData) {
@@ -1163,7 +1130,7 @@ const Print3DTab = () => {
       {/* Model selection section */}
       <div className="bg-card rounded-md border p-4">
         <h2 className="text-lg font-medium mb-3 text-card-foreground">Model</h2>
-        
+
         <div className="space-y-4">
           {/* Model Dropdown */}
           <div>
@@ -1201,7 +1168,7 @@ const Print3DTab = () => {
               </SelectContent>
             </Select>
           </div>
-          
+
           {/* Selected model info or upload button */}
           <div>
             {selectedModelIndex !== null ? (
@@ -1223,8 +1190,8 @@ const Print3DTab = () => {
                 </CardContent>
               </Card>
             ) : (
-              <Button 
-                variant="outline" 
+              <Button
+                variant="outline"
                 className="w-full"
                 onClick={handleUploadModel}
               >
@@ -1232,7 +1199,7 @@ const Print3DTab = () => {
               </Button>
             )}
           </div>
-          
+
           {error && (
             <div className="text-sm text-red-600 flex items-center gap-1.5">
               <AlertCircle className="h-4 w-4" />
@@ -1241,11 +1208,11 @@ const Print3DTab = () => {
           )}
         </div>
       </div>
-          
+
       {/* Filament selection section */}
       <div className="bg-card rounded-md border p-4">
         <h2 className="text-lg font-medium mb-3 text-card-foreground">Material & Quantity</h2>
-        
+
         <div className="space-y-4">
           <div>
             <Label htmlFor="filament-select" className="mb-2 block text-foreground">PLA Color</Label>
@@ -1265,7 +1232,7 @@ const Print3DTab = () => {
               </SelectContent>
             </Select>
           </div>
-          
+
           {/* Quantity selector */}
           <div>
             <Label htmlFor="quantity" className="text-foreground">Quantity</Label>
@@ -1280,9 +1247,9 @@ const Print3DTab = () => {
           </div>
         </div>
       </div>
-            
+
       {/* Order Summary */}
-      <OrderSummary 
+      <OrderSummary
         basePrice={basePrice}
         materialCost={materialCost}
         printingCost={printingCost}
@@ -1293,23 +1260,23 @@ const Print3DTab = () => {
         priceSource={priceSource}
         isPriceCalculating={isPriceCalculating}
         isPreparing={isPreparing}
-        selectedModelName={selectedModelIndex !== null 
+        selectedModelName={selectedModelIndex !== null
           ? models[selectedModelIndex]?.name || 'Unnamed Model'
-          : uploadedModelData 
-            ? 'Uploaded Model' 
+          : uploadedModelData
+            ? 'Uploaded Model'
             : null}
         selectedFilament={filamentColors.find(f => f.id === selectedFilament)?.name || selectedFilament || 'None'}
         quantity={quantity}
         onCalculatePrice={calculatePriceFromAPI}
         formatPrice={formatPrice}
       />
-      
+
       {/* Action buttons */}
       <div className="flex justify-between">
-        <Button 
+        <Button
           onClick={calculatePriceFromAPI}
           disabled={isLoading || isPriceCalculating || !selectedFilament || (selectedModelIndex === null && !uploadedModelData)}
-          variant="outline" 
+          variant="outline"
         >
           {isPriceCalculating ? (
             <>
@@ -1320,8 +1287,8 @@ const Print3DTab = () => {
             "Recalculate Price"
           )}
         </Button>
-        
-        <Button 
+
+        <Button
           onClick={handleCheckout}
           disabled={isLoading || isPriceCalculating || !selectedFilament || (selectedModelIndex === null && !uploadedModelData) || priceSource === 'estimate'}
           className="bg-primary hover:bg-primary/90"
