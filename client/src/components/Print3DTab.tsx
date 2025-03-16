@@ -1189,7 +1189,7 @@ const Print3DTab = () => {
     <div className="space-y-5">
       {/* Model selection section */}
       <div className="bg-card rounded-md border p-4">
-        <h2 className="text-lg font-medium mb-3 text-gray-900">Model</h2>
+        <h2 className="text-lg font-medium mb-3 text-card-foreground">Model</h2>
         
         <div className="space-y-4">
           {/* Model Dropdown */}
@@ -1209,7 +1209,7 @@ const Print3DTab = () => {
               </SelectTrigger>
               <SelectContent>
                 <SelectGroup>
-                  <SelectLabel className="font-medium text-gray-800">From 3D Viewer</SelectLabel>
+                  <SelectLabel className="font-medium text-foreground">From 3D Viewer</SelectLabel>
                   {models.length > 0 ? (
                     models.map((model, index) => (
                       <SelectItem key={index} value={index.toString()}>
@@ -1234,7 +1234,7 @@ const Print3DTab = () => {
             {selectedModelIndex !== null ? (
               <Card className="bg-muted/50">
                 <CardContent className="p-3">
-                  <div className="text-sm text-gray-800">
+                  <div className="text-sm text-foreground">
                     <span className="font-medium">Selected:</span>{" "}
                     {models[selectedModelIndex]?.name || `Model ${selectedModelIndex + 1}`}
                   </div>
@@ -1243,7 +1243,7 @@ const Print3DTab = () => {
             ) : uploadedModelData ? (
               <Card className="bg-muted/50">
                 <CardContent className="p-3">
-                  <div className="text-sm text-gray-800">
+                  <div className="text-sm text-foreground">
                     <span className="font-medium">Uploaded:</span>{" "}
                     Custom Model
                   </div>
@@ -1271,11 +1271,11 @@ const Print3DTab = () => {
           
       {/* Filament selection section */}
       <div className="bg-card rounded-md border p-4">
-        <h2 className="text-lg font-medium mb-3 text-gray-900">Material & Quantity</h2>
+        <h2 className="text-lg font-medium mb-3 text-card-foreground">Material & Quantity</h2>
         
         <div className="space-y-4">
           <div>
-            <Label htmlFor="filament-select" className="mb-2 block text-gray-800">PLA Color</Label>
+            <Label htmlFor="filament-select" className="mb-2 block text-foreground">PLA Color</Label>
             <Select
               value={selectedFilament}
               onValueChange={setSelectedFilament}
@@ -1295,7 +1295,7 @@ const Print3DTab = () => {
           
           {/* Quantity selector */}
           <div>
-            <Label htmlFor="quantity" className="text-gray-800">Quantity</Label>
+            <Label htmlFor="quantity" className="text-foreground">Quantity</Label>
             <Input
               id="quantity"
               type="number"

@@ -125,25 +125,25 @@ export function OrderSummary({
       <CardContent className="space-y-4 pt-0">
         {/* Model info section */}
         <div className="grid grid-cols-[120px_1fr] gap-y-2 text-sm">
-          <div className="text-gray-700 font-medium">Model</div>
+          <div className="text-foreground font-medium">Model</div>
           <div className="font-medium truncate">
             {selectedModelName || 'Not selected'}
           </div>
           
-          <div className="text-gray-700 font-medium">Material</div>
+          <div className="text-foreground font-medium">Material</div>
           <div className="font-medium capitalize">
             {selectedFilament || 'None'}
           </div>
           
-          <div className="text-gray-700 font-medium">Quantity</div>
+          <div className="text-foreground font-medium">Quantity</div>
           <div className="font-medium">
             {quantity}
           </div>
           
           {complexityFactor > 1.05 && (
             <>
-              <div className="text-gray-700 font-medium">Complexity</div>
-              <div className={`font-medium ${complexityFactor > 1.3 ? "text-amber-700" : ""}`}>
+              <div className="text-foreground font-medium">Complexity</div>
+              <div className={`font-medium ${complexityFactor > 1.3 ? "text-amber-700 dark:text-amber-400" : ""}`}>
                 {complexityFactor >= 1.5 ? "Very High" : 
                  complexityFactor >= 1.3 ? "High" : 
                  complexityFactor >= 1.2 ? "Medium" : "Low"}
@@ -156,13 +156,13 @@ export function OrderSummary({
         
         {/* Price breakdown section */}
         <div className="grid grid-cols-[1fr_auto] gap-y-2 text-sm">
-          <div className="text-gray-700">Per Item</div>
+          <div className="text-foreground">Per Item</div>
           <div className="font-medium">{formatPrice(basePrice / quantity)}</div>
           
-          <div className="text-gray-700">Subtotal</div>
+          <div className="text-foreground">Subtotal</div>
           <div className="font-medium">{formatPrice(basePrice)}</div>
           
-          <div className="text-gray-700">Shipping</div>
+          <div className="text-foreground">Shipping</div>
           <div className="font-medium">{basePrice > 50 ? '$10.00' : '$5.00'}</div>
           
           <Separator className="col-span-2 my-1" />
@@ -173,7 +173,7 @@ export function OrderSummary({
         
         {/* Status messages */}
         {(isPriceCalculating || isPreparing) && (
-          <div className="flex items-center justify-center py-1 text-gray-700">
+          <div className="flex items-center justify-center py-1 text-foreground">
             <Loader2 className="h-4 w-4 animate-spin mr-2" />
             <span className="text-sm">
               {isPreparing ? 'Preparing model' : 'Calculating price'}
@@ -182,9 +182,9 @@ export function OrderSummary({
         )}
         
         {connectionStatus === 'failed' && !isPriceCalculating && !isPreparing && (
-          <div className="bg-amber-50 p-2 rounded-md text-xs text-amber-800 border border-amber-200">
+          <div className="bg-amber-50 dark:bg-amber-900/30 p-2 rounded-md text-xs text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-700">
             <p className="flex items-start">
-              <AlertCircle className="h-3.5 w-3.5 mr-1 shrink-0 mt-0.5 text-amber-600" />
+              <AlertCircle className="h-3.5 w-3.5 mr-1 shrink-0 mt-0.5 text-amber-600 dark:text-amber-400" />
               <span>
                 Using standard pricing based on quantity.
                 {connectionAttempts > 1 && (
