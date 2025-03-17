@@ -12,8 +12,8 @@ export default defineConfig(async ({ mode }) => {
   // Log the environment and mode
   console.log(`Configuring Vite with mode: ${mode}`);
   
-  // Use port 4001 to match our .env.local configuration
-  const apiProxyTarget = 'http://localhost:4001';
+  // Use port 4002 to match our API server
+  const apiProxyTarget = 'http://localhost:4002';
   console.log(`Configuring Vite with API proxy target: ${apiProxyTarget}`);
   
   return {
