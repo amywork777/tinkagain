@@ -9,6 +9,8 @@
     "dev:api": "NODE_ENV=development tsx watch server/api-server.ts",
     "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\" \"npm run dev:api\"",
     "dev:client-api": "concurrently \"npm run dev:client\" \"npm run dev:api\"",
+    "dev:stripe": "NODE_ENV=development node server/stripe-server.js",
+    "dev:client-stripe": "concurrently \"npm run dev:client\" \"npm run dev:stripe\"",
     "build": "vite build && tsc",
     "build:api": "tsc -p tsconfig.api.json",
     "test:api": "NODE_ENV=development tsx server/api-server.ts",
