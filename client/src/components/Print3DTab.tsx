@@ -161,6 +161,20 @@ const Print3DTab = () => {
             link: item.filament_link
           };
         });
+        
+        // Reorder the colors array to make Black the default (first item)
+        // Find the black color option
+        const blackColorIndex = colors.findIndex(
+          color => color.name.toLowerCase().includes('black')
+        );
+        
+        // If black color is found and it's not already the first item
+        if (blackColorIndex > 0) {
+          // Remove the black color from its current position
+          const blackColor = colors.splice(blackColorIndex, 1)[0];
+          // Add it to the beginning of the array
+          colors.unshift(blackColor);
+        }
       }
 
       console.log('Normalized filament colors:', colors);
