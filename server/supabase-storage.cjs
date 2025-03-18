@@ -153,22 +153,40 @@ async function storeSTLInSupabase(stlData, fileName) {
       // Get public URL with 10 year expiry
       const tenYearsInSeconds = 315360000; // 10 years in seconds
       
+      console.log(`[${new Date().toISOString()}] Creating signed URL with ${tenYearsInSeconds} seconds validity (10 years)`);
+      
+      // For production, make sure we use the right parameters
+      const expiryDate = new Date();
+      expiryDate.setFullYear(expiryDate.getFullYear() + 10);
+      console.log(`[${new Date().toISOString()}] URL will expire on: ${expiryDate.toISOString()}`);
+      
       const { data: signedUrlData, error: signedUrlError } = await supabase.storage
         .from(BUCKET_NAME)
         .createSignedUrl(storagePath, tenYearsInSeconds);
       
       if (signedUrlError) {
+        console.error(`[${new Date().toISOString()}] Error creating signed URL:`, signedUrlError);
         throw new Error(`Failed to create signed URL: ${signedUrlError.message}`);
       }
       
+      if (!signedUrlData || !signedUrlData.signedUrl) {
+        console.error(`[${new Date().toISOString()}] Signed URL data missing or invalid:`, signedUrlData);
+        throw new Error('Signed URL generation failed - no URL returned');
+      }
+      
       const signedUrl = signedUrlData.signedUrl;
+      console.log(`[${new Date().toISOString()}] Signed URL successfully created. URL length: ${signedUrl.length}`);
       
       // Also get a permanent public URL
       const { data: publicUrlData } = supabase.storage
         .from(BUCKET_NAME)
         .getPublicUrl(storagePath);
       
-      const publicUrl = publicUrlData.publicUrl;
+      if (!publicUrlData || !publicUrlData.publicUrl) {
+        console.error(`[${new Date().toISOString()}] Public URL data missing or invalid:`, publicUrlData);
+      }
+      
+      const publicUrl = publicUrlData?.publicUrl || '';
       
       console.log(`[${new Date().toISOString()}] Generated public URL: ${publicUrl.substring(0, 100)}...`);
       console.log(`[${new Date().toISOString()}] Generated signed URL (valid for 10 years): ${signedUrl.substring(0, 100)}...`);

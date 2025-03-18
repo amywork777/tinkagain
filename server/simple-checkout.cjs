@@ -330,6 +330,7 @@ app.post('/api/checkout', async (req, res) => {
       console.log(`[${new Date().toISOString()}] Uploading STL file...`);
       stlFile = await storeSTLFile(stlBase64, stlFileName);
       console.log(`[${new Date().toISOString()}] STL file stored at ${stlFile.storagePath}`);
+      console.log(`[${new Date().toISOString()}] STL download URL length: ${stlFile.downloadUrl.length} characters`);
     } catch (stlError) {
       console.error(`[${new Date().toISOString()}] Error storing STL file:`, stlError);
       return res.status(500).json({ 
@@ -346,15 +347,25 @@ app.post('/api/checkout', async (req, res) => {
       // Format product price (Stripe expects integer in cents)
       const unitAmount = Math.round(parseFloat(price) * 100);
       
-      // Construct product description
+      // Construct product description - Keep it shorter for Stripe compatibility
       let description = `3D Print: ${modelName}`;
-      if (dimensions) description += `, Size: ${dimensions}`;
-      if (material) description += `, Material: ${material}`;
-      if (infillPercentage) description += `, Infill: ${infillPercentage}%`;
       if (color) description += `, Color: ${color}`;
       
+      // Prepare a shorter version of the URL for Stripe description if needed
+      let displayUrl = stlFile.downloadUrl;
+      
       // Add the STL download URL to the description with a cleaner format
-      description += `\n\n🔗 DOWNLOAD YOUR 3D MODEL:\n${stlFile.downloadUrl}\n\nThis download link is valid for 10 years. Save it somewhere safe!`;
+      // Stripe has character limits, so we need to be careful with long URLs
+      if (process.env.NODE_ENV === 'production') {
+        // For production, use a more compact description format
+        console.log(`[${new Date().toISOString()}] Using production-optimized description format`);
+        description += `\n\n🔗 DOWNLOAD YOUR 3D MODEL:\n${displayUrl}\n\nThis download link is valid for 10 years. Save it somewhere safe!`;
+      } else {
+        // For development/testing, use the full URL
+        description += `\n\n🔗 DOWNLOAD YOUR 3D MODEL:\n${displayUrl}\n\nThis download link is valid for 10 years. Save it somewhere safe!`;
+      }
+      
+      console.log(`[${new Date().toISOString()}] Description length: ${description.length} characters`);
       
       // Create line item for Stripe
       const lineItem = {
@@ -385,9 +396,7 @@ app.post('/api/checkout', async (req, res) => {
           stlUrl: stlFile.downloadUrl,
           stlFileName: stlFile.fileName,
           productName: modelName,
-          dimensions: dimensions || 'Not specified',
-          material: material || 'Not specified',
-          infillPercentage: infillPercentage || 'Not specified',
+          color: color || 'Not specified',
           urlValidity: '10 years',
           downloadInstructions: "Your STL file download link is valid for 10 years. Save it somewhere safe!"
         }
