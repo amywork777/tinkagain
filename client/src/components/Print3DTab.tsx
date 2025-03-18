@@ -1000,26 +1000,86 @@ const Print3DTab = () => {
       // Use a relative URL that will be handled by the Vite proxy
       const uploadEndpoint = `/api/upload-to-supabase`;
       
+      // For large files, implement chunk splitting (optional, only needed for very large files)
+      // Let's assume most STL files are under 50MB and can be handled directly
+      
+      // Check if file is very large and add warning
+      let uploadStrategy = 'direct';
+      if (decodedSize > 30 * 1024 * 1024) {
+        console.log(`[${new Date().toISOString()}] Very large file (${Math.round(decodedSize / (1024 * 1024))}MB). Processing may be slow.`);
+        uploadStrategy = 'large-file';
+      }
+      
+      console.log(`[${new Date().toISOString()}] Using upload strategy: ${uploadStrategy}`);
+      
       // Prepare upload payload
       const uploadPayload = {
         fileName,
         fileData: base64Data,
-        fileType: 'application/octet-stream'
+        fileType: 'application/octet-stream',
+        strategy: uploadStrategy
       };
       
-      // Send request to upload to Supabase with longer timeout
+      // Send request to upload to Supabase with longer timeout (2 minutes)
       console.log(`[${new Date().toISOString()}] Sending upload request to ${uploadEndpoint}`);
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 second timeout
+      const timeoutId = setTimeout(() => controller.abort(), 120000); // 2 minute timeout
       
-      const response = await fetch(uploadEndpoint, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(uploadPayload),
-        signal: controller.signal
+      toast({
+        title: "Uploading model...",
+        description: decodedSize > 5 * 1024 * 1024 ? 
+          `Uploading large model (${Math.round(decodedSize / (1024 * 1024))}MB). This may take a minute.` : 
+          "Uploading model to server",
+        duration: 5000,
       });
+      
+      // Implement retry logic on the frontend for large files
+      let response;
+      const maxRetries = 2;
+      
+      for (let attempt = 0; attempt <= maxRetries; attempt++) {
+        try {
+          if (attempt > 0) {
+            console.log(`[${new Date().toISOString()}] Retry attempt ${attempt}`);
+            // Show retry toast
+            toast({
+              title: `Retrying upload (${attempt}/${maxRetries})`,
+              description: "Still working on uploading your model...",
+              duration: 3000,
+            });
+          }
+          
+          response = await fetch(uploadEndpoint, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(uploadPayload),
+            signal: controller.signal
+          });
+          
+          // If successful, break out of retry loop
+          if (response.ok) break;
+          
+          // If this is the last attempt and still failing, just continue
+          // to the error handling below
+          if (attempt === maxRetries) continue;
+          
+          // Wait before retrying
+          const retryDelay = 3000 * (attempt + 1);
+          console.log(`[${new Date().toISOString()}] Upload failed, waiting ${retryDelay}ms before retry`);
+          await new Promise(resolve => setTimeout(resolve, retryDelay));
+        } catch (retryError) {
+          console.error(`[${new Date().toISOString()}] Upload attempt ${attempt} failed:`, retryError);
+          
+          // If this is the last retry, just let it fall through to error handling below
+          if (attempt < maxRetries) {
+            const retryDelay = 3000 * (attempt + 1);
+            console.log(`[${new Date().toISOString()}] Waiting ${retryDelay}ms before retry`);
+            await new Promise(resolve => setTimeout(resolve, retryDelay));
+          }
+        }
+      }
       
       clearTimeout(timeoutId);
       

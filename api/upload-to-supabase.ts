@@ -2,10 +2,38 @@ import { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
 
-// Initialize Supabase client
+// Initialize Supabase client with custom options for large files
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_KEY;
-const supabase = createClient(supabaseUrl!, supabaseServiceKey!);
+
+// Log environment variables (without exposing keys)
+console.log(`Supabase URL configured: ${supabaseUrl ? 'Yes' : 'No'}`);
+console.log(`Supabase Service Key configured: ${supabaseServiceKey ? 'Yes' : 'No'}`);
+
+// Create client with increased timeouts
+const supabase = createClient(supabaseUrl!, supabaseServiceKey!, {
+  auth: {
+    persistSession: false,
+    autoRefreshToken: false
+  },
+  global: {
+    fetch: (url, options) => {
+      // Set a 2-minute timeout for all Supabase requests
+      const timeoutController = new AbortController();
+      const timeoutId = setTimeout(() => timeoutController.abort(), 120000); // 2 minutes
+      
+      // Combine the abort signal with existing options
+      const fetchOptions = {
+        ...options,
+        signal: timeoutController.signal
+      };
+      
+      return fetch(url, fetchOptions).finally(() => {
+        clearTimeout(timeoutId);
+      });
+    }
+  }
+});
 
 // Constants
 const BUCKET_NAME = 'stl-files';
@@ -34,8 +62,27 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Sanitize the file name
     const safeFileName = fileName.replace(/[^a-zA-Z0-9_\-\.]/g, '_');
     
-    // Convert base64 data to buffer
-    const fileBuffer = Buffer.from(fileData, 'base64');
+    // Make sure the fileData is properly formatted
+    let processedFileData = fileData;
+    
+    // Check if the data is a dataURL and extract just the base64 part if needed
+    if (fileData.startsWith('data:') && fileData.includes('base64,')) {
+      console.log(`[${new Date().toISOString()}] Detected data URL format, extracting base64 content`);
+      processedFileData = fileData.split('base64,')[1];
+    }
+    
+    // Convert base64 data to buffer with error handling
+    console.log(`[${new Date().toISOString()}] Converting base64 to buffer`);
+    let fileBuffer;
+    try {
+      fileBuffer = Buffer.from(processedFileData, 'base64');
+      if (fileBuffer.length === 0) {
+        throw new Error('Empty buffer created');
+      }
+    } catch (bufferError) {
+      console.error(`[${new Date().toISOString()}] Buffer conversion error:`, bufferError);
+      throw new Error(`Failed to process file data: ${bufferError instanceof Error ? bufferError.message : 'Unknown error'}`);
+    }
     
     console.log(`[${new Date().toISOString()}] Processing file: ${safeFileName}, size: ${fileBuffer.length} bytes`);
     
@@ -78,23 +125,57 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       console.log(`[${new Date().toISOString()}] WARNING: Large file detected (${Math.round(fileBuffer.length / (1024 * 1024))}MB)`);
     }
     
-    // Handle upload with increased timeout
+    // Implement chunking and retry logic for large files
     let data: any, error: any;
     
-    try {
-      const uploadResponse = await supabase.storage
-        .from(BUCKET_NAME)
-        .upload(storagePath, fileBuffer, {
-          contentType: fileType,
-          cacheControl: '3600',
-          upsert: true
-        });
-      
-      data = uploadResponse.data;
-      error = uploadResponse.error;
-    } catch (uploadError) {
-      console.error(`[${new Date().toISOString()}] Upload attempt failed:`, uploadError);
-      throw new Error(`Upload failed: ${uploadError instanceof Error ? uploadError.message : 'Unknown error'}`);
+    // For large files (over 6MB), implement retry logic
+    const maxRetries = 3;
+    const CHUNK_SIZE_THRESHOLD = 6 * 1024 * 1024; // 6MB
+    
+    if (fileBuffer.length > CHUNK_SIZE_THRESHOLD) {
+      console.log(`[${new Date().toISOString()}] Large file detected. Implementing retry logic with ${maxRetries} attempts.`);
+    }
+    
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        console.log(`[${new Date().toISOString()}] Upload attempt ${attempt} of ${maxRetries}`);
+        
+        // Add a small delay between retries
+        if (attempt > 1) {
+          const delayMs = 2000 * (attempt - 1); // 2s, 4s for retries
+          console.log(`[${new Date().toISOString()}] Waiting ${delayMs}ms before retry...`);
+          await new Promise(resolve => setTimeout(resolve, delayMs));
+        }
+        
+        // Perform upload with extended timeout
+        const uploadResponse = await supabase.storage
+          .from(BUCKET_NAME)
+          .upload(storagePath, fileBuffer, {
+            contentType: fileType,
+            cacheControl: '3600',
+            upsert: true
+          });
+        
+        // If upload succeeded, break out of retry loop
+        data = uploadResponse.data;
+        error = uploadResponse.error;
+        
+        if (!error) {
+          console.log(`[${new Date().toISOString()}] Upload succeeded on attempt ${attempt}`);
+          break;
+        } else if (attempt < maxRetries) {
+          console.log(`[${new Date().toISOString()}] Attempt ${attempt} failed: ${error.message}, will retry`);
+        }
+      } catch (uploadError) {
+        console.error(`[${new Date().toISOString()}] Upload attempt ${attempt} failed with exception:`, uploadError);
+        
+        // If this is the last retry, throw the error
+        if (attempt === maxRetries) {
+          throw new Error(`Upload failed after ${maxRetries} attempts: ${uploadError instanceof Error ? uploadError.message : 'Unknown error'}`);
+        }
+        
+        console.log(`[${new Date().toISOString()}] Will retry upload...`);
+      }
     }
     
     if (error) {
