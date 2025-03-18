@@ -1,5 +1,9 @@
 // Simple checkout server focused on 3D printing checkout
 
+// Check if we're running in production and log environment info
+console.log(`[${new Date().toISOString()}] Starting server in ${process.env.NODE_ENV || 'development'} mode`);
+console.log(`[${new Date().toISOString()}] Stripe key type: ${process.env.STRIPE_SECRET_KEY?.startsWith('sk_test') ? 'TEST MODE' : 'LIVE MODE'}`);
+
 // Check if we're running in production and load production config
 if (process.env.NODE_ENV === 'production') {
   try {
@@ -432,17 +436,38 @@ app.post('/api/upload-to-supabase', async (req, res) => {
 // Route for Stripe checkout (without file upload)
 app.post('/api/stripe-checkout', async (req, res) => {
   console.log(`[${new Date().toISOString()}] Stripe checkout request received`);
+  console.log(`[${new Date().toISOString()}] Running in ${process.env.NODE_ENV || 'development'} mode`);
+  console.log(`[${new Date().toISOString()}] Using Stripe key type: ${process.env.STRIPE_SECRET_KEY?.startsWith('sk_test') ? 'TEST' : 'LIVE'}`);
   
   try {
-    // Validate request
-    if (!req.body || !req.body.finalPrice) {
+    // Validate request body exists
+    if (!req.body) {
+      console.error(`[${new Date().toISOString()}] Request body is missing or undefined`);
+      return res.status(400).json({
+        success: false,
+        error: 'Missing request body'
+      });
+    }
+    
+    // Validate required finalPrice field
+    if (req.body.finalPrice === undefined || req.body.finalPrice === null) {
+      console.error(`[${new Date().toISOString()}] Missing required field: finalPrice`);
       return res.status(400).json({
         success: false,
         error: 'Missing required fields: finalPrice is required'
       });
     }
     
-    // Extract information from request
+    // Check that Stripe is initialized
+    if (!stripe) {
+      console.error(`[${new Date().toISOString()}] Stripe is not initialized! Check STRIPE_SECRET_KEY environment variable.`);
+      return res.status(500).json({
+        success: false,
+        error: 'Stripe payment processor is not available'
+      });
+    }
+    
+    // Extract information from request with defaults
     const {
       modelName = 'Custom 3D Print',
       color = 'Default',
@@ -454,69 +479,118 @@ app.post('/api/stripe-checkout', async (req, res) => {
     
     console.log(`[${new Date().toISOString()}] Processing checkout for ${modelName}, price: $${finalPrice}, color: ${color}, material: ${material}`);
     
-    // Convert price to cents if it's not already
+    // Convert price to cents safely
     const priceCents = Math.round(parseFloat(finalPrice) * 100);
+    if (isNaN(priceCents) || priceCents <= 0) {
+      console.error(`[${new Date().toISOString()}] Invalid price value: ${finalPrice}`);
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid price: must be a positive number'
+      });
+    }
     
-    // Create a product first, then create a price for it
-    const product = await stripe.products.create({
-      name: `3D Print: ${modelName}`,
-      description: `Color: ${color}, Material: ${material}, Quantity: ${quantity}, Infill: ${infillPercentage}%`,
-    });
-    
-    console.log(`[${new Date().toISOString()}] Stripe product created: ${product.id}`);
-    
-    // Create a price for this product
-    const price = await stripe.prices.create({
-      currency: 'usd',
-      unit_amount: priceCents,
-      product: product.id,
-    });
-    
-    console.log(`[${new Date().toISOString()}] Stripe price created: ${price.id}`);
-    
-    // Determine the host for redirect URLs
-    const host = req.headers.origin || 'http://localhost:3000';
-    
-    // Create the Stripe checkout session
-    const session = await stripe.checkout.sessions.create({
-      payment_method_types: ['card'],
-      line_items: [
-        {
-          price: price.id,
-          quantity: 1, // We already factored quantity into the price
+    try {
+      // Create a product first, then create a price for it
+      const product = await stripe.products.create({
+        name: `3D Print: ${modelName}`,
+        description: `Color: ${color}, Material: ${material}, Quantity: ${quantity}, Infill: ${infillPercentage}%`,
+      });
+      
+      console.log(`[${new Date().toISOString()}] Stripe product created: ${product.id}`);
+      
+      // Create a price for this product
+      const price = await stripe.prices.create({
+        currency: 'usd',
+        unit_amount: priceCents,
+        product: product.id,
+      });
+      
+      console.log(`[${new Date().toISOString()}] Stripe price created: ${price.id}`);
+      
+      // Determine the host for redirect URLs
+      let host = '';
+      
+      // In production, try to detect the right host from headers
+      if (process.env.NODE_ENV === 'production') {
+        const protocol = req.headers['x-forwarded-proto'] || 'https';
+        const hostHeader = req.headers['x-forwarded-host'] || req.headers.host;
+        if (hostHeader) {
+          host = `${protocol}://${hostHeader}`;
+          console.log(`[${new Date().toISOString()}] Production host detected: ${host}`);
+        } else {
+          host = process.env.BASE_URL || 'https://3dcad.taiyaki.ai';
+          console.log(`[${new Date().toISOString()}] Using fallback host: ${host}`);
+        }
+      } else {
+        // For development
+        host = req.headers.origin || 'http://localhost:3000';
+        console.log(`[${new Date().toISOString()}] Development host: ${host}`);
+      }
+      
+      console.log(`[${new Date().toISOString()}] Using redirect host: ${host}`);
+      
+      // Create the Stripe checkout session
+      const session = await stripe.checkout.sessions.create({
+        payment_method_types: ['card'],
+        line_items: [
+          {
+            price: price.id,
+            quantity: 1, // We already factored quantity into the price
+          },
+        ],
+        mode: 'payment',
+        success_url: `${host}/checkout-confirmation?session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url: `${host}/`,
+        metadata: {
+          modelName,
+          color,
+          quantity: quantity.toString(),
+          finalPrice: finalPrice.toString(),
+          material,
+          infillPercentage: infillPercentage.toString(),
+          orderType: '3d_print'
         },
-      ],
-      mode: 'payment',
-      success_url: `${host}/checkout-confirmation?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${host}/`,
-      metadata: {
-        modelName,
-        color,
-        quantity: quantity.toString(),
-        finalPrice: finalPrice.toString(),
-        material,
-        infillPercentage: infillPercentage.toString(),
-        orderType: '3d_print'
-      },
-      billing_address_collection: 'required',
-      shipping_address_collection: {
-        allowed_countries: ['US', 'CA', 'GB', 'AU'],
-      },
-    });
-    
-    console.log(`[${new Date().toISOString()}] Stripe session created: ${session.id}`);
-    
-    // Return the checkout URL
-    return res.status(200).json({
-      success: true,
-      url: session.url,
-      sessionId: session.id
-    });
+        billing_address_collection: 'required',
+        shipping_address_collection: {
+          allowed_countries: ['US', 'CA', 'GB', 'AU'],
+        },
+      });
+      
+      console.log(`[${new Date().toISOString()}] Stripe session created: ${session.id}`);
+      console.log(`[${new Date().toISOString()}] Stripe checkout URL: ${session.url}`);
+      
+      // Return the checkout URL
+      return res.status(200).json({
+        success: true,
+        url: session.url,
+        sessionId: session.id
+      });
+    } catch (stripeError) {
+      console.error(`[${new Date().toISOString()}] Stripe API error:`, stripeError);
+      
+      // Handle specific Stripe errors
+      if (stripeError.type === 'StripeAuthenticationError') {
+        console.error(`[${new Date().toISOString()}] Stripe authentication error. Check if your API key is valid and for the right environment (test/live).`);
+        return res.status(500).json({
+          success: false,
+          error: 'Payment processor authentication failed',
+          details: stripeError.message
+        });
+      }
+      
+      // General Stripe error
+      return res.status(500).json({
+        success: false,
+        error: 'Payment processing error',
+        details: stripeError.message
+      });
+    }
   } catch (error) {
-    console.error(`[${new Date().toISOString()}] Stripe checkout error:`, error);
+    console.error(`[${new Date().toISOString()}] Server error in checkout:`, error);
     return res.status(500).json({
       success: false,
-      error: error.message || 'Checkout failed'
+      error: 'Server error processing checkout',
+      details: error.message
     });
   }
 });
@@ -1496,7 +1570,7 @@ async function sendDownloadLinkEmail(email, modelName, downloadUrl, fileName, di
         
         <div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #e0e0e0; font-size: 0.9em; color: #718096;">
           <p>Thank you for choosing Taiyaki 3D Printing.</p>
-          <p>If you have any questions, please contact us at support@taiyaki.studio</p>
+          <p>If you have any questions, please contact us at taiyaki.orders@gmail.com</p>
         </div>
       </div>
     `;

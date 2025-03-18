@@ -153,7 +153,7 @@ const CheckoutConfirmation = () => {
                 We've sent a confirmation email with your order details and download link.
               </p>
               <p className="text-muted-foreground mb-6">
-                If you have any questions about your order, please contact us at support@taiyaki.studio
+                If you have any questions about your order, please contact us at taiyaki.orders@gmail.com
               </p>
               
               {downloadUrl && (

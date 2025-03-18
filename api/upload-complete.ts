@@ -55,13 +55,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
     }
     
-    // Extract data
+    // Extract data with support for v2 client
     const { 
       uploadId, 
       fileName,
       totalChunks,
-      checksum
+      checksum,
+      uploadedChunks = [], // Optional array of successfully uploaded chunk indices
+      version = '1.0'      // API version
     } = req.body;
+    
+    console.log(`[${new Date().toISOString()}] Completing upload ${uploadId}, client version: ${version}`);
+    console.log(`[${new Date().toISOString()}] Upload metadata: ${fileName}, ${totalChunks} chunks`);
+    
+    // If client sent uploadedChunks, log which chunks should be present
+    if (uploadedChunks && Array.isArray(uploadedChunks) && uploadedChunks.length > 0) {
+      console.log(`[${new Date().toISOString()}] Client reported ${uploadedChunks.length} of ${totalChunks} chunks uploaded`);
+      if (uploadedChunks.length < totalChunks) {
+        console.log(`[${new Date().toISOString()}] Warning: Incomplete upload, proceeding with available chunks`);
+      }
+    }
     
     console.log(`[${new Date().toISOString()}] Completing upload ${uploadId} with ${totalChunks} chunks`);
     
@@ -82,7 +95,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // Continue anyway, the bucket might exist
     }
     
-    // List all chunks
+    // List all chunks with detailed logging
+    console.log(`[${new Date().toISOString()}] Listing chunks for upload ID: ${uploadId}`);
+    
     const { data: chunksData, error: listError } = await supabase.storage
       .from(CHUNKS_BUCKET)
       .list(uploadId);
@@ -90,6 +105,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (listError) {
       console.error(`[${new Date().toISOString()}] Error listing chunks:`, listError);
       throw new Error(`Failed to list chunks: ${listError.message}`);
+    }
+    
+    // Log chunk information
+    console.log(`[${new Date().toISOString()}] Found ${chunksData?.length || 0} chunks in bucket`);
+    if (chunksData && chunksData.length > 0) {
+      chunksData.forEach((chunk, i) => {
+        console.log(`[${new Date().toISOString()}] Chunk ${i}: ${chunk.name}, size: ${chunk.metadata?.size || 'unknown'} bytes`);
+      });
     }
     
     // Verify all chunks are present
@@ -117,20 +140,57 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     for (let i = 0; i < sortedChunks.length; i++) {
       const chunkPath = `${uploadId}/${sortedChunks[i].name}`;
       
-      // Download the chunk
-      const { data: chunkBuffer, error: downloadError } = await supabase.storage
-        .from(CHUNKS_BUCKET)
-        .download(chunkPath);
+      try {
+        // Download the chunk with type logging
+        console.log(`[${new Date().toISOString()}] Downloading chunk ${i+1}: ${chunkPath}`);
+        const { data: chunkBlob, error: downloadError } = await supabase.storage
+          .from(CHUNKS_BUCKET)
+          .download(chunkPath);
+          
+        if (downloadError || !chunkBlob) {
+          console.error(`[${new Date().toISOString()}] Error downloading chunk ${i}:`, downloadError);
+          throw new Error(`Failed to download chunk ${i}: ${downloadError?.message || 'Unknown error'}`);
+        }
         
-      if (downloadError || !chunkBuffer) {
-        console.error(`[${new Date().toISOString()}] Error downloading chunk ${i}:`, downloadError);
-        throw new Error(`Failed to download chunk ${i}: ${downloadError?.message || 'Unknown error'}`);
+        console.log(`[${new Date().toISOString()}] Chunk ${i+1} downloaded, type: ${typeof chunkBlob}${chunkBlob instanceof Blob ? ', is Blob' : ''}${Buffer.isBuffer(chunkBlob) ? ', is Buffer' : ''}`);
+        
+        if (chunkBlob instanceof Blob) {
+          console.log(`[${new Date().toISOString()}] Blob size: ${chunkBlob.size} bytes, type: ${chunkBlob.type}`);
+        }
+        
+        // Fix: Handle different blob types properly
+        let chunkBuffer;
+        
+        if (chunkBlob instanceof Blob) {
+          // Convert Blob to ArrayBuffer
+          const arrayBuffer = await chunkBlob.arrayBuffer();
+          // Then convert ArrayBuffer to Buffer
+          chunkBuffer = Buffer.from(arrayBuffer);
+        } else if (Buffer.isBuffer(chunkBlob)) {
+          // Already a buffer
+          chunkBuffer = chunkBlob;
+        } else if (chunkBlob instanceof Uint8Array) {
+          // Convert Uint8Array to Buffer
+          chunkBuffer = Buffer.from(chunkBlob);
+        } else if (typeof chunkBlob === 'object' && chunkBlob !== null && 'arrayBuffer' in chunkBlob && typeof chunkBlob.arrayBuffer === 'function') {
+          // Generic ArrayBuffer-like object
+          const arrayBuffer = await chunkBlob.arrayBuffer();
+          chunkBuffer = Buffer.from(arrayBuffer);
+        } else {
+          throw new Error(`Unsupported chunk data type: ${typeof chunkBlob}`);
+        }
+        
+        // Log chunk buffer type and size for debugging
+        console.log(`[${new Date().toISOString()}] Chunk ${i+1} type: ${Buffer.isBuffer(chunkBuffer) ? 'Buffer' : typeof chunkBuffer}, size: ${chunkBuffer.length} bytes`);
+        
+        // Append to assembled file
+        assembledFile = Buffer.concat([assembledFile, chunkBuffer]);
+        
+        console.log(`[${new Date().toISOString()}] Added chunk ${i + 1}/${totalChunks}, total size: ${assembledFile.length} bytes`);
+      } catch (chunkError) {
+        console.error(`[${new Date().toISOString()}] Error processing chunk ${i}:`, chunkError);
+        throw new Error(`Failed to process chunk ${i}: ${chunkError instanceof Error ? chunkError.message : 'Unknown error'}`);
       }
-      
-      // Append to assembled file
-      assembledFile = Buffer.concat([assembledFile, chunkBuffer]);
-      
-      console.log(`[${new Date().toISOString()}] Added chunk ${i + 1}/${totalChunks}, total size: ${assembledFile.length} bytes`);
     }
     
     // Generate a unique storage path with date-based organization
