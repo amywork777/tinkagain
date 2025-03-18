@@ -69,31 +69,18 @@ async function uploadSTLToFirebase(stlData: string, fileName: string): Promise<{
   // Process the STL data
   let fileBuffer: Buffer;
   if (stlData.startsWith('data:')) {
-    // Extract the base64 part if it's a data URL
     const base64Data = stlData.split(',')[1];
     fileBuffer = Buffer.from(base64Data, 'base64');
   } else {
-    // Assume it's already base64
     fileBuffer = Buffer.from(stlData, 'base64');
   }
   
-  // Create a temporary file path
-  const tempDir = path.join(os.tmpdir(), 'stl-uploads');
-  if (!fs.existsSync(tempDir)) {
-    fs.mkdirSync(tempDir, { recursive: true });
-  }
-  const tempFilePath = path.join(tempDir, `${timestamp}-${uniqueId}-${safeFileName}`);
-  
-  // Write buffer to temporary file
-  fs.writeFileSync(tempFilePath, fileBuffer);
-  
   try {
-    // Upload to Firebase Storage
-    console.log('Starting Firebase upload with file size:', fileBuffer.length, 'bytes');
-    console.log('Upload destination:', storagePath);
+    // Create a new file in Firebase Storage
+    const file = firebaseStorage.file(storagePath);
     
-    const [uploadedFile] = await firebaseStorage.upload(tempFilePath, {
-      destination: storagePath,
+    // Upload the buffer directly
+    await file.save(fileBuffer, {
       metadata: {
         contentType: 'model/stl',
         metadata: {
@@ -103,34 +90,29 @@ async function uploadSTLToFirebase(stlData: string, fileName: string): Promise<{
       }
     });
 
-    console.log('File uploaded to Firebase. File details:', {
-      name: uploadedFile.name,
-      bucket: uploadedFile.bucket.name,
-      exists: await uploadedFile.exists(),
-      metadata: await uploadedFile.getMetadata()
-    });
-    
+    // Verify the file exists
+    const [exists] = await file.exists();
+    if (!exists) {
+      throw new Error('File failed to upload to Firebase');
+    }
+
     // Get a signed URL with long expiration
-    console.log('Generating signed URL for path:', storagePath);
-    const [signedUrl] = await firebaseStorage.file(storagePath).getSignedUrl({
+    const [signedUrl] = await file.getSignedUrl({
       action: 'read',
       expires: Date.now() + 315360000000, // 10 years in milliseconds
     });
-    
-    console.log('Generated signed URL length:', signedUrl.length);
-    console.log('Signed URL preview (first 100 chars):', signedUrl.substring(0, 100));
-    
+
+    if (!signedUrl) {
+      throw new Error('Failed to generate signed URL');
+    }
+
     return {
       downloadUrl: signedUrl,
       filePath: storagePath
     };
-  } finally {
-    // Clean up the temporary file
-    try {
-      fs.unlinkSync(tempFilePath);
-    } catch (error) {
-      console.error('Error deleting temporary file:', error);
-    }
+  } catch (error) {
+    console.error('Firebase upload error:', error);
+    throw new Error(`Failed to upload file to Firebase: ${error.message}`);
   }
 }
 
