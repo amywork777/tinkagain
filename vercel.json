@@ -41,6 +41,16 @@
       "dest": "/api/create-checkout-session.ts"
     },
     {
+      "src": "/api/stripe-checkout",
+      "dest": "/api/stripe-checkout.ts",
+      "methods": ["POST", "OPTIONS"]
+    },
+    {
+      "src": "/api/upload-to-supabase",
+      "dest": "/api/upload-to-supabase.ts",
+      "methods": ["POST", "OPTIONS"]
+    },
+    {
       "src": "/api/print/create-checkout-session",
       "dest": "/api/print/create-checkout-session.ts"
     },
@@ -74,4 +84,4 @@
       "dest": "/"
     }
   ]
-} 
+}
