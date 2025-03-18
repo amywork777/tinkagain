@@ -56,6 +56,21 @@
       }
     },
     {
+      "src": "/api/upload-init",
+      "dest": "/api/upload-init.ts",
+      "methods": ["POST", "OPTIONS"]
+    },
+    {
+      "src": "/api/upload-chunk",
+      "dest": "/api/upload-chunk.ts",
+      "methods": ["POST", "OPTIONS"]
+    },
+    {
+      "src": "/api/upload-complete",
+      "dest": "/api/upload-complete.ts",
+      "methods": ["POST", "OPTIONS"]
+    },
+    {
       "src": "/api/print/create-checkout-session",
       "dest": "/api/print/create-checkout-session.ts"
     },

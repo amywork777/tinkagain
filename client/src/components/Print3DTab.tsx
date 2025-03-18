@@ -991,7 +991,7 @@ const Print3DTab = () => {
     return hashHex;
   };
   
-  // Function to upload file to Supabase
+  // Function to upload file to Supabase with chunking for large files
   const uploadFileToSupabase = async (fileData: string, fileName: string) => {
     console.log(`[${new Date().toISOString()}] SUPABASE UPLOAD: Uploading file to Supabase: ${fileName}`);
     
@@ -1005,113 +1005,34 @@ const Print3DTab = () => {
       const decodedSize = Math.ceil((base64Data.length * 3) / 4);
       console.log(`[${new Date().toISOString()}] Estimated file size: ${Math.round(decodedSize / 1024)}KB`);
       
-      if (decodedSize > 5 * 1024 * 1024) {
-        console.log(`[${new Date().toISOString()}] Large file detected (${Math.round(decodedSize / (1024 * 1024))}MB). Processing may take longer.`);
-      }
-      
-      // Use a relative URL that will be handled by the Vite proxy
-      const uploadEndpoint = `/api/upload-to-supabase`;
-      
-      // For large files, implement chunk splitting for very large files
-      let uploadStrategy = 'direct';
-      
-      // Check if file is large and potentially needs special handling
-      if (decodedSize > 30 * 1024 * 1024) {
-        console.log(`[${new Date().toISOString()}] Very large file (${Math.round(decodedSize / (1024 * 1024))}MB). Processing may be slow.`);
-        uploadStrategy = 'large-file';
-      } else if (decodedSize > 4 * 1024 * 1024) {
-        // Files over 4MB are approaching Vercel's default 4.5MB limit
-        console.log(`[${new Date().toISOString()}] Medium size file (${Math.round(decodedSize / (1024 * 1024))}MB).`);
-        uploadStrategy = 'medium-file';
-      }
-      
-      console.log(`[${new Date().toISOString()}] Using upload strategy: ${uploadStrategy}`);
-      
       // Add checksum to verify data integrity
       const fileChecksum = await generateChecksum(base64Data);
       console.log(`[${new Date().toISOString()}] File checksum: ${fileChecksum.slice(0, 8)}...`);
       
-      // Prepare upload payload
-      const uploadPayload = {
-        fileName,
-        fileData: base64Data,
-        fileType: 'application/octet-stream',
-        strategy: uploadStrategy,
-        checksum: fileChecksum,
-        timestamp: Date.now()
-      };
+      // Generate a unique filename with timestamp to avoid conflicts
+      const timestamp = Date.now();
+      const uniqueFileName = `${timestamp}-${fileName}`;
       
-      // Send request to upload to Supabase with longer timeout (2 minutes)
-      console.log(`[${new Date().toISOString()}] Sending upload request to ${uploadEndpoint}`);
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 120000); // 2 minute timeout
-      
+      // Show upload toast
       toast({
         title: "Uploading model...",
-        description: decodedSize > 5 * 1024 * 1024 ? 
-          `Uploading large model (${Math.round(decodedSize / (1024 * 1024))}MB). This may take a minute.` : 
+        description: decodedSize > 4 * 1024 * 1024 ? 
+          `Large model (${Math.round(decodedSize / (1024 * 1024))}MB). Using chunked upload.` : 
           "Uploading model to server",
         duration: 5000,
       });
       
-      // Implement retry logic on the frontend for large files
-      let response;
-      const maxRetries = 2;
+      let uploadResult;
       
-      for (let attempt = 0; attempt <= maxRetries; attempt++) {
-        try {
-          if (attempt > 0) {
-            console.log(`[${new Date().toISOString()}] Retry attempt ${attempt}`);
-            // Show retry toast
-            toast({
-              title: `Retrying upload (${attempt}/${maxRetries})`,
-              description: "Still working on uploading your model...",
-              duration: 3000,
-            });
-          }
-          
-          response = await fetch(uploadEndpoint, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify(uploadPayload),
-            signal: controller.signal
-          });
-          
-          // If successful, break out of retry loop
-          if (response.ok) break;
-          
-          // If this is the last attempt and still failing, just continue
-          // to the error handling below
-          if (attempt === maxRetries) continue;
-          
-          // Wait before retrying
-          const retryDelay = 3000 * (attempt + 1);
-          console.log(`[${new Date().toISOString()}] Upload failed, waiting ${retryDelay}ms before retry`);
-          await new Promise(resolve => setTimeout(resolve, retryDelay));
-        } catch (retryError) {
-          console.error(`[${new Date().toISOString()}] Upload attempt ${attempt} failed:`, retryError);
-          
-          // If this is the last retry, just let it fall through to error handling below
-          if (attempt < maxRetries) {
-            const retryDelay = 3000 * (attempt + 1);
-            console.log(`[${new Date().toISOString()}] Waiting ${retryDelay}ms before retry`);
-            await new Promise(resolve => setTimeout(resolve, retryDelay));
-          }
-        }
-      }
-      
-      clearTimeout(timeoutId);
-      
-      if (!response.ok) {
-        throw new Error(`Server responded with status: ${response.status}`);
-      }
-      
-      const uploadResult = await response.json();
-      
-      if (uploadResult.error) {
-        throw new Error(uploadResult.error);
+      // DIFFERENT STRATEGIES BASED ON FILE SIZE
+      if (decodedSize > 4 * 1024 * 1024) {
+        // For files larger than 4MB, use chunked upload to work around Vercel limits
+        console.log(`[${new Date().toISOString()}] Using chunked upload for large file`);
+        uploadResult = await uploadLargeFileInChunks(base64Data, uniqueFileName, fileChecksum);
+      } else {
+        // For smaller files, use standard upload
+        console.log(`[${new Date().toISOString()}] Using standard upload for small file`);
+        uploadResult = await uploadStandardFile(base64Data, uniqueFileName);
       }
       
       console.log(`[${new Date().toISOString()}] SUPABASE UPLOAD SUCCESS:`, uploadResult);
@@ -1132,6 +1053,157 @@ const Print3DTab = () => {
       });
       throw error; // Re-throw to be handled by the caller
     }
+  };
+  
+  // Function to handle standard file upload for small files
+  const uploadStandardFile = async (base64Data: string, fileName: string) => {
+    console.log(`[${new Date().toISOString()}] Standard upload for file: ${fileName}`);
+    
+    const uploadEndpoint = `/api/upload-to-supabase`;
+    
+    // Set up controller with timeout
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 60000); // 1 minute timeout
+    
+    // Create payload
+    const uploadPayload = {
+      fileName,
+      fileData: base64Data,
+      fileType: 'application/octet-stream',
+      strategy: 'direct'
+    };
+    
+    try {
+      // Send upload request
+      const response = await fetch(uploadEndpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(uploadPayload),
+        signal: controller.signal
+      });
+      
+      clearTimeout(timeoutId);
+      
+      if (!response.ok) {
+        throw new Error(`Server responded with status: ${response.status}`);
+      }
+      
+      return await response.json();
+    } catch (error) {
+      clearTimeout(timeoutId);
+      console.error(`[${new Date().toISOString()}] Standard upload failed:`, error);
+      throw error;
+    }
+  };
+  
+  // Function to handle chunked file upload for large files
+  const uploadLargeFileInChunks = async (base64Data: string, fileName: string, checksum: string) => {
+    console.log(`[${new Date().toISOString()}] Starting chunked upload for file: ${fileName}`);
+    
+    // Max size per chunk should be under 2MB to stay well under Vercel limits
+    const CHUNK_SIZE = 1.5 * 1024 * 1024; // 1.5MB per chunk in base64
+    const chunks = [];
+    
+    // Split data into chunks
+    for (let i = 0; i < base64Data.length; i += CHUNK_SIZE) {
+      chunks.push(base64Data.slice(i, i + CHUNK_SIZE));
+    }
+    
+    console.log(`[${new Date().toISOString()}] File split into ${chunks.length} chunks`);
+    
+    // Create metadata with file info
+    const fileMetadata = {
+      fileName,
+      totalChunks: chunks.length,
+      checksum: checksum,
+      fileSize: base64Data.length,
+      contentType: 'application/octet-stream',
+      uploadId: `${Date.now()}-${Math.random().toString(36).substring(2, 10)}`
+    };
+    
+    // First, initialize the chunked upload
+    const initResponse = await fetch('/api/upload-init', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(fileMetadata)
+    });
+    
+    if (!initResponse.ok) {
+      const errorText = await initResponse.text();
+      throw new Error(`Failed to initialize chunked upload: ${errorText}`);
+    }
+    
+    const initData = await initResponse.json();
+    const uploadId = initData.uploadId || fileMetadata.uploadId;
+    
+    // Upload each chunk with retry logic
+    for (let i = 0; i < chunks.length; i++) {
+      const chunk = chunks[i];
+      let success = false;
+      const maxRetries = 3;
+      
+      // Show progress toast for large uploads
+      if (chunks.length > 5 && i % Math.max(1, Math.floor(chunks.length / 5)) === 0) {
+        toast({
+          title: `Uploading: ${Math.round((i / chunks.length) * 100)}%`,
+          description: `Uploading chunk ${i + 1} of ${chunks.length}`,
+          duration: 2000,
+        });
+      }
+      
+      // Try to upload this chunk with retries
+      for (let attempt = 0; attempt < maxRetries && !success; attempt++) {
+        try {
+          // If retrying, wait a bit
+          if (attempt > 0) {
+            await new Promise(r => setTimeout(r, 1000 * attempt));
+            console.log(`[${new Date().toISOString()}] Retrying chunk ${i + 1}, attempt ${attempt + 1}`);
+          }
+          
+          // Upload this chunk
+          const chunkResponse = await fetch('/api/upload-chunk', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              uploadId,
+              chunkIndex: i,
+              totalChunks: chunks.length,
+              chunkData: chunk,
+              fileName
+            })
+          });
+          
+          if (!chunkResponse.ok) {
+            throw new Error(`Chunk upload failed with status: ${chunkResponse.status}`);
+          }
+          
+          success = true;
+        } catch (error) {
+          console.error(`[${new Date().toISOString()}] Error uploading chunk ${i + 1}:`, error);
+          // Last attempt failed
+          if (attempt === maxRetries - 1) throw error;
+        }
+      }
+    }
+    
+    // All chunks uploaded successfully, complete the upload
+    const completeResponse = await fetch('/api/upload-complete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        uploadId,
+        fileName,
+        totalChunks: chunks.length,
+        checksum
+      })
+    });
+    
+    if (!completeResponse.ok) {
+      const errorText = await completeResponse.text();
+      throw new Error(`Failed to complete chunked upload: ${errorText}`);
+    }
+    
+    return await completeResponse.json();
   };
   
   // Function to initiate Stripe checkout
