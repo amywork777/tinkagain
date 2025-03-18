@@ -339,39 +339,64 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       let stlDownloadUrl = '';
       let stlFilePath = '';
       
-      // Upload STL file to Firebase if provided
+      // Upload STL file to Stripe if provided
+      let stripeFileId = '';
       if (stlFileData && stlFileName) {
         try {
-          console.log('Uploading STL file to Firebase Storage');
-          const uploadResult = await uploadSTLToFirebase(stlFileData, stlFileName);
+          console.log('Uploading STL file to Stripe');
           
-          stlDownloadUrl = uploadResult.downloadUrl;
-          stlFilePath = uploadResult.filePath;
+          // Convert base64 to buffer
+          let fileBuffer;
+          if (stlFileData.startsWith('data:')) {
+            const base64Data = stlFileData.split(',')[1];
+            fileBuffer = Buffer.from(base64Data, 'base64');
+          } else {
+            fileBuffer = Buffer.from(stlFileData, 'base64');
+          }
           
-          console.log('STL file uploaded successfully');
-          console.log('Download URL:', stlDownloadUrl.substring(0, 100) + '...');
+          // Create a file in Stripe
+          const file = await stripe.files.create({
+            file: fileBuffer,
+            purpose: 'dispute_evidence',
+            metadata: {
+              fileName: stlFileName,
+              modelName,
+              color,
+              quantity: quantity.toString()
+            }
+          });
           
-          // Log the full length of the URL and a clearer indication that it was generated
-          console.log(`FULL STL DOWNLOAD URL LENGTH: ${stlDownloadUrl.length} characters`);
-          console.log(`STL URL EXAMPLE (first 150 chars): ${stlDownloadUrl.substring(0, 150)}...`);
-          console.log('This URL will be included in Stripe product description');
-        } catch (uploadError) {
-          console.error('Failed to upload STL file to Firebase:', uploadError);
-          // Continue with checkout even if upload fails
+          stripeFileId = file.id;
+          console.log('STL file uploaded to Stripe:', stripeFileId);
+          
+          // Also upload to Firebase as backup
+          try {
+            console.log('Uploading STL file to Firebase Storage as backup');
+            const uploadResult = await uploadSTLToFirebase(stlFileData, stlFileName);
+            stlDownloadUrl = uploadResult.downloadUrl;
+            stlFilePath = uploadResult.filePath;
+            console.log('STL file uploaded to Firebase successfully');
+          } catch (firebaseError) {
+            console.error('Failed to upload STL file to Firebase:', firebaseError);
+          }
+        } catch (stripeError) {
+          console.error('Failed to upload STL file to Stripe:', stripeError);
         }
       }
       
       // Add STL download link to product description
       let productDescription = `3D Print in ${color} (Qty: ${quantity})`;
+      if (stripeFileId) {
+        productDescription += `\n\nSTL File ID: ${stripeFileId}`;
+      }
       if (stlDownloadUrl) {
-        // Simplified format that's more likely to display properly in Stripe
-        productDescription = `3D Print in ${color} (Qty: ${quantity}). STL DOWNLOAD LINK: ${stlDownloadUrl}`;
+        productDescription += `\n\nBackup Download Link: ${stlDownloadUrl}`;
       }
 
       // Create a product in Stripe for this 3D print
       const product = await stripe.products.create({
-        name: stlDownloadUrl 
-          ? `3D Print: ${modelName} (Download Available)` 
+        name: stripeFileId 
+          ? `3D Print: ${modelName} (File Attached)` 
           : `3D Print: ${modelName}`,
         description: productDescription,
         metadata: {
@@ -381,8 +406,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           printType: '3d_print',
           stlFileName: stlFileName || '',
           stlFilePath: stlFilePath || '',
-          hasStlFile: stlDownloadUrl ? 'true' : 'false',
-          stlDownloadUrl: stlDownloadUrl || ''  // Always include in metadata, even if empty
+          hasStlFile: stripeFileId ? 'true' : 'false',
+          stripeFileId: stripeFileId || '',
+          stlDownloadUrl: stlDownloadUrl || ''
         }
       });
       
@@ -402,7 +428,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         stlFileName: stlFileName || 'unknown.stl'
       };
       
-      // Add STL download URL to metadata if available
+      // Add file information to metadata
+      if (stripeFileId) {
+        sessionMetadata.stripeFileId = stripeFileId;
+      }
       if (stlDownloadUrl) {
         sessionMetadata.stlDownloadUrl = stlDownloadUrl;
         sessionMetadata.stlFilePath = stlFilePath;
@@ -418,8 +447,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           },
         ],
         mode: 'payment',
-        success_url: stlDownloadUrl 
-          ? `${host}/checkout-confirmation?session_id={CHECKOUT_SESSION_ID}&stl_url=${encodeURIComponent(stlDownloadUrl)}`
+        success_url: stripeFileId 
+          ? `${host}/checkout-confirmation?session_id={CHECKOUT_SESSION_ID}&file_id=${stripeFileId}`
           : `${host}/checkout-confirmation?session_id={CHECKOUT_SESSION_ID}`,
         cancel_url: `${host}/`,
         metadata: sessionMetadata,
@@ -434,10 +463,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           allowed_types: ['stl'],
           max_file_size: 50 * 1024 * 1024, // 50MB max file size
         },
-        // Add custom text to display the download URL directly in the checkout page
-        custom_text: stlDownloadUrl ? {
+        // Add custom text to display the file information
+        custom_text: stripeFileId ? {
           submit: {
-            message: `IMPORTANT: Save your STL download link: ${stlDownloadUrl}`
+            message: `IMPORTANT: Your STL file has been attached to this order (ID: ${stripeFileId})`
           }
         } : undefined,
       });
