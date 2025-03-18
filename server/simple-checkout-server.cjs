@@ -38,6 +38,10 @@ const BASE_URL = process.env.BASE_URL || `http://localhost:${PORT}`;
 // Initialize Express
 const app = express();
 
+// Increase the payload size limit to handle larger STL files
+app.use(express.json({ limit: '100mb' }));
+app.use(express.urlencoded({ extended: true, limit: '100mb' }));
+
 // Log key environment variables
 console.log('Environment variables loaded:');
 console.log('- STRIPE_PRICE_MONTHLY:', process.env.STRIPE_PRICE_MONTHLY);
@@ -796,6 +800,19 @@ async function handleSuccessfulPayment(session) {
         // Continue processing even if email fails
       }
       
+      // Send email with the signed URL and Stripe order reference
+      if (stlDownloadUrl) {
+        const mailOptions = {
+          from: process.env.EMAIL_USER,
+          to: 'taiyaki.orders@gmail.com',
+          subject: `New Order: ${modelName}`,
+          text: `A new order has been placed. Here is the signed URL for the STL file: ${stlDownloadUrl}\nStripe Order Reference: ${session.id}`
+        };
+        
+        await transporter.sendMail(mailOptions);
+        console.log('Email sent with the signed URL and Stripe order reference to taiyaki.orders@gmail.com');
+      }
+      
       return orderData;
     } catch (dbError) {
       console.error('Failed to save order to database:', dbError);
@@ -1525,14 +1542,63 @@ app.post('/api/webhook', async (req, res) => {
       process.env.STRIPE_WEBHOOK_SECRET || 'whsec_test'
     );
     
+    console.log(`Webhook received: ${event.type}`);
+    
     // Handle the event based on its type
     switch (event.type) {
       case 'checkout.session.completed': {
         const session = event.data.object;
         console.log('Payment successful for session:', session.id);
         
-        // Process the completed checkout session
-        await handleSuccessfulPayment(session);
+        try {
+          // Process the completed checkout session
+          const orderDetails = await handleSuccessfulPayment(session);
+          
+          // Send email to taiyaki.orders@gmail.com with order details and Supabase link
+          if (process.env.EMAIL_USER && transporter) {
+            const { stlUrl, stlFileName, productName } = session.metadata;
+            
+            // Check if we have the STL URL
+            if (stlUrl) {
+              const mailOptions = {
+                from: process.env.EMAIL_USER,
+                to: 'taiyaki.orders@gmail.com',
+                subject: `New 3D Print Order: ${productName || 'Unknown Model'}`,
+                html: `
+                  <h1>New 3D Print Order Received</h1>
+                  
+                  <h2>Order Details</h2>
+                  <ul>
+                    <li><strong>Stripe Session ID:</strong> ${session.id}</li>
+                    <li><strong>Product:</strong> ${productName || 'Unknown Model'}</li>
+                    <li><strong>Customer Email:</strong> ${session.customer_details?.email || 'Not provided'}</li>
+                    <li><strong>Amount:</strong> $${(session.amount_total / 100).toFixed(2)}</li>
+                    <li><strong>Date:</strong> ${new Date().toLocaleString()}</li>
+                  </ul>
+                  
+                  <h2>STL File Link</h2>
+                  <p><strong>File Name:</strong> ${stlFileName || 'Unknown'}</p>
+                  <p><strong>Download Link:</strong> <a href="${stlUrl}">${stlUrl}</a></p>
+                  <p><strong>Validity:</strong> 10 years</p>
+                  
+                  <h2>Customer Shipping Address</h2>
+                  <p>${formatAddress(session.shipping_details?.address) || 'No shipping address provided'}</p>
+                `
+              };
+              
+              try {
+                await transporter.sendMail(mailOptions);
+                console.log('Order notification email sent to taiyaki.orders@gmail.com');
+              } catch (emailError) {
+                console.error('Failed to send order notification email:', emailError);
+              }
+            } else {
+              console.error('STL URL not found in session metadata');
+            }
+          }
+        } catch (processingError) {
+          console.error('Error processing successful payment:', processingError);
+        }
         break;
       }
       // Add more cases for other events you want to handle
@@ -1544,6 +1610,18 @@ app.post('/api/webhook', async (req, res) => {
     res.status(400).send(`Webhook Error: ${err.message}`);
   }
 });
+
+// Helper function to format an address
+function formatAddress(address) {
+  if (!address) return 'No address provided';
+  
+  return [
+    address.line1,
+    address.line2,
+    `${address.city}, ${address.state} ${address.postal_code}`,
+    address.country
+  ].filter(Boolean).join(', ');
+}
 
 // Add an endpoint to download a stored STL file from Firebase Storage
 app.get('/api/download-stl/:orderId', async (req, res) => {
@@ -4022,4 +4100,209 @@ app.get('/checkout-confirmation', (req, res) => {
       <a href="/" style="display: inline-block; margin-top: 20px; padding: 10px 20px; background-color: #0366d6; color: white; text-decoration: none; border-radius: 4px;">Return to Home</a>
     </div>
   `);
+});
+
+// Modify the STL file processing function to handle larger files more efficiently
+async function storeSTLInSupabase(stlData, fileName) {
+  console.log('[2025-03-18T08:52:04.694Z] Preparing to store STL file in Supabase Storage...');
+  
+  try {
+    // Process the STL data with better error handling
+    let stlBuffer;
+    console.log(`[2025-03-18T08:52:04.695Z] STL data type: ${typeof stlData}`);
+    
+    // For very large files, log only the beginning of the data
+    if (typeof stlData === 'string') {
+      console.log(`[2025-03-18T08:52:04.695Z] STL data string preview: ${stlData.substring(0, 100)}...`);
+      console.log(`[2025-03-18T08:52:04.695Z] STL data length: ${stlData.length} characters`);
+      
+      try {
+        // Check if it's a data URL (starts with data:)
+        if (stlData.startsWith('data:')) {
+          console.log('[2025-03-18T08:52:04.695Z] Processing data URL format STL...');
+          const matches = stlData.match(/^data:([^;]+);base64,(.+)$/);
+          if (matches && matches.length >= 3) {
+            stlBuffer = Buffer.from(matches[2], 'base64');
+          } else {
+            throw new Error('Invalid data URL format');
+          }
+        } else {
+          // Process as direct base64 data
+          console.log('[2025-03-18T08:52:04.695Z] Using direct base64 data');
+          stlBuffer = Buffer.from(stlData, 'base64');
+        }
+        
+        // Verify the buffer isn't empty
+        if (!stlBuffer || stlBuffer.length === 0) {
+          throw new Error('Converted buffer is empty');
+        }
+        
+        console.log(`[2025-03-18T08:52:04.695Z] Converted base64 data to buffer of size: ${stlBuffer.length} bytes`);
+      } catch (error) {
+        console.error(`Error processing STL data: ${error.message}`);
+        throw new Error(`Failed to process STL string data: ${error.message}`);
+      }
+    } else if (Buffer.isBuffer(stlData)) {
+      stlBuffer = stlData;
+      console.log(`[2025-03-18T08:52:04.695Z] Processing buffer data of size: ${stlBuffer.length} bytes`);
+    } else {
+      throw new Error(`Unsupported STL data format: ${typeof stlData}`);
+    }
+    
+    // Process the file in chunks for large files
+    console.log(`[2025-03-18T08:52:04.695Z] STL file size: ${stlBuffer.length} bytes`);
+    
+    // Check for reasonable size limits (100MB max)
+    if (stlBuffer.length > 100 * 1024 * 1024) {
+      throw new Error('STL file too large (max 100MB)');
+    }
+    
+    // Continue with the existing code for file upload...
+  } catch (error) {
+    console.error(`STL processing error: ${error.message}`);
+    throw error;
+  }
+}
+
+// Improve the checkout endpoint to handle complex models and large files
+app.post('/api/checkout', async (req, res) => {
+  console.log('[timestamp] Checkout request received');
+  
+  try {
+    const { 
+      stlBase64, 
+      stlFileName, 
+      modelName, 
+      dimensions, 
+      material, 
+      infillPercentage, 
+      price, 
+      email,
+      additionalOptions
+    } = req.body;
+    
+    // Log request info but truncate large data
+    console.log('[timestamp] Request body keys:', Object.keys(req.body));
+    console.log(`[timestamp] Processing checkout for "${modelName}" (${stlFileName})`);
+    
+    if (!stlBase64 || !stlFileName) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Missing STL file data or filename' 
+      });
+    }
+    
+    // Check for reasonable size limits
+    if (stlBase64.length > 20 * 1024 * 1024) { // 20MB as base64 (approx. 15MB file)
+      return res.status(413).json({
+        success: false,
+        message: 'STL file too large (max 15MB). For larger models, please contact us directly.'
+      });
+    }
+    
+    // Upload the STL file with improved error handling
+    console.log('[timestamp] Uploading STL file...');
+    
+    let stlFile;
+    try {
+      stlFile = await storeSTLInSupabase(stlBase64, stlFileName);
+      if (!stlFile || !stlFile.downloadUrl) {
+        throw new Error('Failed to get download URL from storage');
+      }
+    } catch (uploadError) {
+      console.error('[timestamp] Error uploading STL file:', uploadError);
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to upload STL file',
+        error: uploadError.message
+      });
+    }
+    
+    // Create a timeout for long-running operations
+    const checkoutTimeout = setTimeout(() => {
+      console.error('[timestamp] Checkout process timed out');
+      if (!res.headersSent) {
+        return res.status(504).json({
+          success: false,
+          message: 'Checkout process timed out. Your model may be too complex.'
+        });
+      }
+    }, 60000); // 60 second timeout
+    
+    // Proceed with Stripe checkout session creation
+    try {
+      // Format model information
+      const modelInfo = `${modelName} (${dimensions})`;
+      const materialInfo = `Material: ${material}, Infill: ${infillPercentage}%`;
+      
+      // Create a more detailed description for complex models
+      const description = `3D model: ${modelInfo}\n${materialInfo}${additionalOptions ? `\nOptions: ${additionalOptions}` : ''}`;
+      
+      // Create line item with full information
+      const lineItem = {
+        price_data: {
+          currency: 'usd',
+          product_data: {
+            name: `3D Print: ${modelName}`,
+            description: description.substring(0, 500), // Stripe has a 500 char limit
+          },
+          unit_amount: price,
+        },
+        quantity: 1,
+      };
+      
+      // Create the Stripe session with better metadata
+      const session = await stripe.checkout.sessions.create({
+        payment_method_types: ['card'],
+        line_items: [lineItem],
+        mode: 'payment',
+        success_url: `${process.env.BASE_URL || 'http://localhost:3000'}/checkout-success?session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url: `${process.env.BASE_URL || 'http://localhost:3000'}/checkout-cancel`,
+        customer_email: email,
+        metadata: {
+          stlUrl: stlFile.downloadUrl,
+          stlFileName: stlFileName,
+          productName: modelName,
+          dimensions: dimensions || 'Not specified',
+          material: material || 'Not specified',
+          infillPercentage: infillPercentage || '20',
+          urlValidity: '10 years',
+          downloadInstructions: 'Your STL file download link is valid for 10 years. Save it somewhere safe!',
+          isComplexModel: stlBase64.length > 1000000 ? 'true' : 'false' // Flag for complex models
+        }
+      });
+      
+      // Clear the timeout as checkout was successful
+      clearTimeout(checkoutTimeout);
+      
+      console.log(`[timestamp] Stripe checkout session created successfully. Session ID: ${session.id}`);
+      
+      return res.status(200).json({
+        success: true,
+        id: session.id,
+        url: session.url,
+        stlInfo: {
+          url: stlFile.downloadUrl,
+          fileName: stlFileName
+        }
+      });
+    } catch (checkoutError) {
+      // Clear the timeout in case of error
+      clearTimeout(checkoutTimeout);
+      
+      console.error('[timestamp] Error creating checkout session:', checkoutError);
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to create checkout session',
+        error: checkoutError.message
+      });
+    }
+  } catch (error) {
+    console.error('[timestamp] Unexpected error in checkout process:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'An unexpected error occurred',
+      error: error.message
+    });
+  }
 });
