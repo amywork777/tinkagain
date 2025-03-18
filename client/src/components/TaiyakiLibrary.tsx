@@ -8,7 +8,20 @@ import { useToast } from "@/hooks/use-toast";
 import { FEATURES } from '@/lib/constants';
 import { Progress } from '@/components/ui/progress';
 
-export function TaiyakiLibrary() {
+export const TaiyakiLibrary = () => {
+  return (
+    <div className="w-full h-screen overflow-hidden">
+      <iframe
+        src={process.env.NEXT_PUBLIC_TAIYAKI_LIBRARY_URL || "https://taiyaki.studio/library"}
+        className="w-full h-full"
+        allow="microphone; camera; accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+        allowFullScreen
+      ></iframe>
+    </div>
+  );
+};
+
+export function TaiyakiLibraryOld() {
   const [isLoading, setIsLoading] = useState(true);
   const { subscription, hasAccess, decrementModelCount } = useSubscription();
   const navigate = useNavigate();

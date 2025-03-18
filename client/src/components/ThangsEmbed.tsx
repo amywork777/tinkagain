@@ -17,6 +17,21 @@ const PROXIES = [
 // Proxy names for display
 const PROXY_NAMES = ["CORS.eu.org", "AllOrigins"];
 
+export const ThangsEmbed = ({ modelId, height = "600px", width = "100%" }: ThangsEmbedProps) => {
+  return (
+    <div style={{ width, height }}>
+      <iframe
+        src={`https://thangs.com/embed/${modelId}?hideExplore=true&hideMenu=true&autoRotate=true&hideShare=true`}
+        width="100%"
+        height="100%"
+        frameBorder="0"
+        allow="microphone; camera; accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+        allowFullScreen
+      ></iframe>
+    </div>
+  );
+};
+
 export function ThangsEmbed() {
   const [isLoading, setIsLoading] = useState(true);
   const [hasError, setHasError] = useState(false);

@@ -8,6 +8,19 @@ import { useAuth } from '@/context/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { Progress } from '@/components/ui/progress';
 
+export const MagicFishAI = () => {
+  return (
+    <div className="w-full h-screen overflow-hidden">
+      <iframe
+        src={process.env.NEXT_PUBLIC_MAGICFISH_URL || "https://www.magicfish.ai"}
+        className="w-full h-full"
+        allow="microphone; camera; accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+        allowFullScreen
+      ></iframe>
+    </div>
+  );
+};
+
 export function MagicFishAI() {
   const [isLoading, setIsLoading] = useState(true);
   const [hasError, setHasError] = useState(false);

@@ -160,7 +160,8 @@ export function ExternalLibraryFrame({
           "allow-scripts allow-same-origin allow-forms allow-popups"
         }
         referrerPolicy="no-referrer-when-downgrade"
-        allow="clipboard-read; clipboard-write"
+        allow="clipboard-read; clipboard-write; microphone; camera; accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture"
+        allowFullScreen
         loading="lazy"
         className={`${loading || error ? 'invisible' : 'visible'}`}
       />
