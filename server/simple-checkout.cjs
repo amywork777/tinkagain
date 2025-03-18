@@ -1,4 +1,15 @@
 // Simple checkout server focused on 3D printing checkout
+
+// Check if we're running in production and load production config
+if (process.env.NODE_ENV === 'production') {
+  try {
+    require('./production-config.js');
+    console.log(`[${new Date().toISOString()}] Loaded production configuration`);
+  } catch (err) {
+    console.error(`[${new Date().toISOString()}] Failed to load production configuration:`, err.message);
+  }
+}
+
 const express = require('express');
 const bodyParser = require('body-parser');
 const cors = require('cors');
@@ -274,6 +285,19 @@ app.use(bodyParser.urlencoded({
 // Add request logging middleware
 app.use((req, res, next) => {
   console.log(`${new Date().toISOString()} - ${req.method} ${req.url}`);
+  
+  // In production, dynamically update BASE_URL if needed
+  if (process.env.NODE_ENV === 'production' && req.headers.host) {
+    const protocol = req.headers['x-forwarded-proto'] || 'http';
+    const newBaseUrl = `${protocol}://${req.headers.host}`;
+    
+    // Only log if it's different
+    if (process.env.BASE_URL !== newBaseUrl) {
+      console.log(`[${new Date().toISOString()}] Updating BASE_URL to: ${newBaseUrl}`);
+      process.env.BASE_URL = newBaseUrl;
+    }
+  }
+  
   next();
 });
 
@@ -288,8 +312,42 @@ app.get('/api/health', (req, res) => {
 });
 
 // Add a route to serve locally stored STL files
-app.use('/local-storage', express.static(path.join(process.cwd(), 'local-storage')));
-console.log(`[${new Date().toISOString()}] Local file storage route enabled at /local-storage`);
+const localStoragePath = path.join(process.cwd(), 'local-storage');
+app.use('/local-storage', express.static(localStoragePath));
+console.log(`[${new Date().toISOString()}] Local file storage route enabled at /local-storage for path: ${localStoragePath}`);
+
+// In production, create the local-storage directory if it doesn't exist
+if (process.env.NODE_ENV === 'production') {
+  // Ensure local-storage directories exist for fallback
+  const stlFilesPath = path.join(localStoragePath, 'stl-files');
+  const modelsPath = path.join(localStoragePath, 'models');
+  
+  try {
+    if (!fs.existsSync(localStoragePath)) {
+      console.log(`[${new Date().toISOString()}] Creating local-storage directory in production`);
+      fs.mkdirSync(localStoragePath, { recursive: true });
+    }
+    
+    if (!fs.existsSync(stlFilesPath)) {
+      console.log(`[${new Date().toISOString()}] Creating stl-files directory in production`);
+      fs.mkdirSync(stlFilesPath, { recursive: true });
+    }
+    
+    if (!fs.existsSync(modelsPath)) {
+      console.log(`[${new Date().toISOString()}] Creating models directory in production`);
+      fs.mkdirSync(modelsPath, { recursive: true });
+    }
+    
+    // Check if directories are writable
+    const testFile = path.join(localStoragePath, '.write-test');
+    fs.writeFileSync(testFile, 'test');
+    fs.unlinkSync(testFile);
+    console.log(`[${new Date().toISOString()}] Confirmed local-storage directory is writable in production`);
+  } catch (err) {
+    console.error(`[${new Date().toISOString()}] Error setting up local-storage in production:`, err.message);
+    console.error(`[${new Date().toISOString()}] This may affect fallback functionality`);
+  }
+}
 
 // Simple debug endpoint to test connectivity
 app.post('/api/debug-checkout', (req, res) => {
@@ -435,6 +493,19 @@ app.post('/api/webhook', async (req, res) => {
   }
 });
 
+// Add a helper function for creating consistent file URLs across environments
+function createFileUrl(relativePath, isLocal = false) {
+  const baseUrl = process.env.BASE_URL || 'http://localhost:4002';
+  const url = `${baseUrl}/${isLocal ? 'local-storage/' : ''}${relativePath}`;
+  
+  // Log the created URL for debugging
+  if (process.env.NODE_ENV === 'production') {
+    console.log(`[${new Date().toISOString()}] Created file URL in production: ${url} (from ${relativePath})`);
+  }
+  
+  return url;
+}
+
 // Helper function to store STL files
 async function storeSTLFile(stlData, fileName) {
   console.log('[' + new Date().toISOString() + '] Starting STL file storage process');
@@ -546,8 +617,7 @@ async function storeSTLFile(stlData, fileName) {
       console.log('[' + new Date().toISOString() + '] Saved STL file locally to:', localFilePath);
       
       // Create a local file URL
-      const hostUrl = process.env.BASE_URL || 'http://localhost:4002';
-      const fileUrl = `${hostUrl}/local-storage/stl-files/${year}/${month}/${day}/${timestamp}-${uniqueId}-${fileName}`;
+      const fileUrl = createFileUrl(`stl-files/${year}/${month}/${day}/${timestamp}-${uniqueId}-${fileName}`, true);
       
       console.log('[' + new Date().toISOString() + '] Created local file URL:', fileUrl);
       
@@ -608,8 +678,7 @@ async function storeSTLFile(stlData, fileName) {
           console.log('[' + new Date().toISOString() + '] Saved STL file locally to:', localFilePath);
           
           // Create a local file URL
-          const hostUrl = process.env.BASE_URL || 'http://localhost:4002';
-          const fileUrl = `${hostUrl}/local-storage/stl-files/${year}/${month}/${day}/${timestamp}-${uniqueId}-${fileName}`;
+          const fileUrl = createFileUrl(`stl-files/${year}/${month}/${day}/${timestamp}-${uniqueId}-${fileName}`, true);
           
           console.log('[' + new Date().toISOString() + '] Created local file URL:', fileUrl);
           
@@ -676,7 +745,7 @@ async function storeSTLFile(stlData, fileName) {
       
       // Try writing to a temp file and uploading as a fallback
       try {
-        // If bucket not found, try to find available buckets or use local storage
+        // If bucket not found, try to find available buckets
         if (error.message && (error.message.includes('Bucket not found') || error.message.includes('not found'))) {
           console.warn('[' + new Date().toISOString() + '] Bucket not found. Trying local file storage...');
           
@@ -694,8 +763,7 @@ async function storeSTLFile(stlData, fileName) {
           console.log('[' + new Date().toISOString() + '] Saved STL file locally to:', localFilePath);
           
           // Create a local file URL
-          const hostUrl = process.env.BASE_URL || 'http://localhost:4002';
-          const fileUrl = `${hostUrl}/local-storage/stl-files/${year}/${month}/${day}/${timestamp}-${uniqueId}-${fileName}`;
+          const fileUrl = createFileUrl(`stl-files/${year}/${month}/${day}/${timestamp}-${uniqueId}-${fileName}`, true);
           
           console.log('[' + new Date().toISOString() + '] Created local file URL:', fileUrl);
           
@@ -755,8 +823,7 @@ async function storeSTLFile(stlData, fileName) {
             console.log('[' + new Date().toISOString() + '] Saved STL file locally to:', localFilePath);
             
             // Create a local file URL
-            const hostUrl = process.env.BASE_URL || 'http://localhost:4002';
-            const fileUrl = `${hostUrl}/local-storage/stl-files/${year}/${month}/${day}/${timestamp}-${uniqueId}-${fileName}`;
+            const fileUrl = createFileUrl(`stl-files/${year}/${month}/${day}/${timestamp}-${uniqueId}-${fileName}`, true);
             
             console.log('[' + new Date().toISOString() + '] Created local file URL:', fileUrl);
             
@@ -807,8 +874,7 @@ async function storeSTLFile(stlData, fileName) {
           console.log('[' + new Date().toISOString() + '] Saved STL file locally to:', localFilePath);
           
           // Create a local file URL
-          const hostUrl = process.env.BASE_URL || 'http://localhost:4002';
-          const fileUrl = `${hostUrl}/local-storage/stl-files/${year}/${month}/${day}/${timestamp}-${uniqueId}-${fileName}`;
+          const fileUrl = createFileUrl(`stl-files/${year}/${month}/${day}/${timestamp}-${uniqueId}-${fileName}`, true);
           
           console.log('[' + new Date().toISOString() + '] Created local file URL:', fileUrl);
           
@@ -1429,6 +1495,38 @@ async function sendDownloadLinkEmail(email, modelName, downloadUrl, fileName, di
     return false;
   }
 }
+
+// Add a debugging endpoint for environment variables (safe version)
+app.get('/api/debug-environment', (req, res) => {
+  const envSummary = {
+    nodeEnv: process.env.NODE_ENV || 'not set',
+    baseUrl: process.env.BASE_URL || 'not set',
+    apiPort: process.env.API_PORT || 'not set',
+    storageType: storageType || 'not configured',
+    supabse: {
+      hasBucket: process.env.SUPABASE_STORAGE_BUCKET ? true : false,
+      bucketName: process.env.SUPABASE_STORAGE_BUCKET || 'not set',
+      hasUrl: process.env.SUPABASE_URL ? true : false,
+      hasKey: process.env.SUPABASE_SERVICE_KEY ? true : false,
+    },
+    stripe: {
+      hasKey: process.env.STRIPE_SECRET_KEY ? true : false,
+      testMode: process.env.STRIPE_SECRET_KEY?.startsWith('sk_test') || false,
+      hasWebhookSecret: process.env.STRIPE_WEBHOOK_SECRET ? true : false
+    },
+    serverTime: new Date().toISOString(),
+    headers: {
+      host: req.headers.host,
+      protocol: req.headers['x-forwarded-proto'] || 'http',
+      userAgent: req.headers['user-agent']
+    }
+  };
+  
+  res.json({
+    success: true,
+    environment: envSummary
+  });
+});
 
 // Start the server
 app.listen(PORT, () => {
