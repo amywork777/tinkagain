@@ -428,28 +428,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         shipping_address_collection: {
           allowed_countries: ['US', 'CA', 'GB', 'AU'], // Add the countries you ship to
         },
-        shipping_options: stlDownloadUrl ? [
-          {
-            shipping_rate_data: {
-              type: 'fixed_amount',
-              fixed_amount: {
-                amount: 0,
-                currency: 'usd',
-              },
-              display_name: `STL DOWNLOAD: ${stlDownloadUrl.substring(0, 50)}...`,
-              delivery_estimate: {
-                minimum: {
-                  unit: 'business_day',
-                  value: 5,
-                },
-                maximum: {
-                  unit: 'business_day',
-                  value: 10,
-                },
-              }
-            }
-          }
-        ] : undefined,
+        // Add file upload capability for STL files
+        file_upload: {
+          enabled: true,
+          allowed_types: ['stl'],
+          max_file_size: 50 * 1024 * 1024, // 50MB max file size
+        },
         // Add custom text to display the download URL directly in the checkout page
         custom_text: stlDownloadUrl ? {
           submit: {
