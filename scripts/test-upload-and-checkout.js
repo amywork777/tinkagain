@@ -17,6 +17,7 @@ import os from 'os';
 import fetch from 'node-fetch';
 import crypto from 'crypto';
 import { fileURLToPath } from 'url';
+import axios from 'axios';
 
 // ES module compatibility
 const __filename = fileURLToPath(import.meta.url);
@@ -176,6 +177,52 @@ async function testCheckout(base64STL, fileName) {
 }
 
 /**
+ * Add a test to simulate a successful checkout and verify email sending
+ */
+async function testCheckoutAndEmail() {
+  try {
+    console.log('Starting checkout and email test...');
+
+    // Simulate a checkout request
+    const response = await axios.post('http://localhost:4002/api/checkout', {
+      stlBase64: 'c29saWQgc2ltcGxlX2N1YmUKZmFjZXQgbm9ybWFsIDAgMCAwCiAgb3V0ZXIgbG9vcAogICAgdmVydGV4IDAgMCAwCiAgICB2ZXJ0ZXggMSAwIDAKICAgIHZlcnRleCAxIDEgMAogIGVuZGxvb3AKZW5kZmFjZXQKZW5kc29saWQgc2ltcGxlX2N1YmU=',
+      stlFileName: 'test.stl',
+      modelName: 'Test Model',
+      dimensions: '10x10x10',
+      material: 'PLA',
+      infillPercentage: 20,
+      price: 1999,
+      email: 'test@example.com'
+    });
+
+    console.log('Checkout response:', response.data);
+
+    // Simulate Stripe webhook for successful payment
+    const webhookResponse = await axios.post('http://localhost:4002/api/webhook', {
+      id: 'evt_test_webhook',
+      type: 'checkout.session.completed',
+      data: {
+        object: {
+          id: response.data.sessionId,
+          metadata: {
+            modelName: 'Test Model',
+            stlDownloadUrl: 'https://example.com/download/test.stl'
+          }
+        }
+      }
+    }, {
+      headers: {
+        'Stripe-Signature': 'whsec_test'
+      }
+    });
+
+    console.log('Webhook response:', webhookResponse.data);
+  } catch (error) {
+    console.error('Error during checkout and email test:', error);
+  }
+}
+
+/**
  * Main function to orchestrate the test
  */
 async function main() {
@@ -189,6 +236,9 @@ async function main() {
     
     // Test the checkout endpoint
     await testCheckout(testFile.base64Content, testFile.fileName);
+    
+    // Test checkout and email
+    await testCheckoutAndEmail();
     
   } catch (error) {
     console.error(colors.red + 'Test failed:' + colors.reset, error);

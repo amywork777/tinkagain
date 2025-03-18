@@ -7,6 +7,16 @@ import { Button } from '@/components/ui/button';
 import { useScene } from '@/hooks/use-scene';
 import { AlertCircle, CheckCircle, XCircle, ArrowUpCircle, RotateCw } from 'lucide-react';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
+import { useCallback } from 'react';
+import { STLLoader } from 'three/examples/jsm/loaders/STLLoader';
+import * as THREE from 'three';
+import axios from 'axios';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Loader2, Upload } from 'lucide-react';
+import { Slider } from '@/components/ui/slider';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
+import { useToast } from '@/hooks/use-toast';
 
 // Define the allowed origins - ensure this matches what's in the server
 const ALLOWED_ORIGINS = ["https://fishcad.com", "https://www.fishcad.com", "http://localhost:3000", "http://localhost:3001", "http://localhost:5173"];
@@ -58,6 +68,48 @@ interface ActiveImport {
   progress: number;
 }
 
+// Add this function to handle chunked file reading for larger STL files
+function readFileChunked(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const CHUNK_SIZE = 2 * 1024 * 1024; // 2MB chunks
+    const fileReader = new FileReader();
+    let offset = 0;
+    let result = '';
+    
+    // Process the file in chunks
+    const readNextChunk = () => {
+      const blob = file.slice(offset, offset + CHUNK_SIZE);
+      fileReader.readAsArrayBuffer(blob);
+    };
+    
+    fileReader.onload = (e) => {
+      if (!e.target?.result) {
+        reject(new Error('Failed to read file chunk'));
+        return;
+      }
+      
+      // Convert the chunk to a base64 string and append to result
+      const chunk = Buffer.from(e.target.result as ArrayBuffer).toString('base64');
+      result += chunk;
+      
+      // Move to the next chunk or finish
+      offset += CHUNK_SIZE;
+      if (offset < file.size) {
+        readNextChunk();
+      } else {
+        resolve(result);
+      }
+    };
+    
+    fileReader.onerror = (error) => {
+      reject(error);
+    };
+    
+    // Start reading the first chunk
+    readNextChunk();
+  });
+}
+
 // STL Importer component
 export function STLImporter() {
   // State for socket and active imports
@@ -68,6 +120,32 @@ export function STLImporter() {
   
   // Get the scene functions
   const { loadSTL, selectModel, models } = useScene();
+  
+  // State for file handling
+  const [file, setFile] = useState<File | null>(null);
+  const [stlData, setStlData] = useState<THREE.BufferGeometry | null>(null);
+  const [base64Data, setBase64Data] = useState<string | null>(null);
+  const [processingFile, setProcessingFile] = useState(false);
+  const [processingCheckout, setProcessingCheckout] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [error, setError] = useState<string | null>(null);
+  const [dimensions, setDimensions] = useState('');
+  const [stlInfo, setStlInfo] = useState<{
+    vertices: number;
+    triangles: number;
+    volume: number;
+    size: string;
+  } | null>(null);
+  
+  const [modelName, setModelName] = useState('');
+  const [modelWidth, setModelWidth] = useState('100');
+  const [modelHeight, setModelHeight] = useState('100');
+  const [modelDepth, setModelDepth] = useState('100');
+  const [material, setMaterial] = useState('PLA');
+  const [infill, setInfill] = useState(20);
+  const [email, setEmail] = useState('');
+  
+  const { toast } = useToast();
   
   // Initialize socket connection
   useEffect(() => {

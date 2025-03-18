@@ -96,31 +96,23 @@ try {
   // Firestore and storage will be undefined
 }
 
-// Set up Nodemailer for email notifications
+// Create email transporter for notifications
 let transporter = null;
-if (process.env.EMAIL_USER && process.env.EMAIL_PASSWORD) {
-  try {
+try {
+  if (process.env.EMAIL_USER && (process.env.EMAIL_PASS || process.env.EMAIL_PASSWORD)) {
     transporter = nodemailer.createTransport({
       service: 'gmail',
       auth: {
         user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASSWORD
-      }
+        pass: process.env.EMAIL_PASS || process.env.EMAIL_PASSWORD // Check both environment variables
+      },
     });
-    
-    // Verify the connection
-    transporter.verify((error) => {
-      if (error) {
-        console.error('Error setting up email transport:', error);
-      } else {
-        console.log('Email transport ready for sending notifications');
-      }
-    });
-  } catch (emailError) {
-    console.error('Failed to initialize email transport:', emailError);
+    console.log(`[Email] Email notifications configured for ${process.env.EMAIL_USER}`);
+  } else {
+    console.log('[Email] Email notification credentials not found in environment');
   }
-} else {
-  console.log('Email credentials not provided. Email notifications will be disabled.');
+} catch (emailError) {
+  console.error('[Email] Error setting up email transport:', emailError);
 }
 
 // Initialize Stripe
@@ -2294,20 +2286,23 @@ app.post('/api/checkout', async (req, res) => {
       
       console.log(`[timestamp] Stripe checkout session created successfully. Session ID: ${session.id}`);
       
-      // For testing: Send an email immediately with the Supabase link
-      if (NODE_ENV === 'development' && transporter) {
-        console.log('[Dev Testing] Sending immediate test email with Supabase link');
+      // Send an email notification with the Supabase link - works in both development and production
+      if (transporter) {
+        console.log('[Email Notification] Sending immediate email with Supabase link');
         
-        const testMailOptions = {
+        // Get environment indicator for the subject line
+        const envPrefix = NODE_ENV === 'production' ? '' : '[TEST] ';
+        
+        const mailOptions = {
           from: process.env.EMAIL_USER,
           to: 'taiyaki.orders@gmail.com',
-          subject: `[TEST] New Order: ${modelName}`,
+          subject: `${envPrefix}New Order: ${modelName}`,
           html: `
             <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-              <h1 style="color: #4a5568;">Test 3D Print Order</h1>
+              <h1 style="color: #4a5568;">3D Print Order</h1>
               
               <div style="background-color: #f7fafc; padding: 15px; border-radius: 5px; margin: 20px 0;">
-                <h2 style="margin-top: 0; color: #4a5568;">Test Order Details</h2>
+                <h2 style="margin-top: 0; color: #4a5568;">Order Details</h2>
                 <p><strong>Order ID:</strong> ${session.id}</p>
                 <p><strong>Date:</strong> ${new Date().toLocaleString()}</p>
                 <p><strong>Product:</strong> ${modelName}</p>
@@ -2325,19 +2320,22 @@ app.post('/api/checkout', async (req, res) => {
               </div>
               
               <div style="background-color: #f0fff4; padding: 15px; border-radius: 5px; margin: 20px 0;">
-                <h2 style="margin-top: 0; color: #2f855a;">This is a test email</h2>
-                <p>This email was sent for testing purposes to verify that Supabase links are correctly included.</p>
+                <h2 style="margin-top: 0; color: #2f855a;">Customer Information</h2>
+                <p><strong>Email:</strong> ${email}</p>
+                <p><strong>Environment:</strong> ${NODE_ENV}</p>
               </div>
             </div>
           `
         };
         
         try {
-          const info = await transporter.sendMail(testMailOptions);
-          console.log(`[Dev Testing] Test email sent: ${info.messageId}`);
+          const info = await transporter.sendMail(mailOptions);
+          console.log(`[Email Notification] Email sent: ${info.messageId}`);
         } catch (emailError) {
-          console.error('[Dev Testing] Error sending test email:', emailError);
+          console.error('[Email Notification] Error sending email:', emailError);
         }
+      } else {
+        console.warn('[Email Notification] Email transporter not configured - unable to send email');
       }
       
       return res.status(200).json({

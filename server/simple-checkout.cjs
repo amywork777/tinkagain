@@ -226,51 +226,194 @@ app.post('/api/webhook', async (req, res) => {
   }
 });
 
-// Update the storeSTLFile function to use Supabase
-async function storeSTLFile(stlBase64, fileName) {
-  console.log(`[${new Date().toISOString()}] Processing STL file storage request for ${fileName}`);
-  
+// Update the storeSTLFile function for better handling of large files
+async function storeSTLFile(stlData, fileName) {
   try {
-    if (!stlBase64) {
-      console.error(`[${new Date().toISOString()}] No STL data provided`);
+    console.log('[' + new Date().toISOString() + '] Processing STL file storage request for ' + fileName);
+    console.log('[' + new Date().toISOString() + '] Storing STL file "' + fileName + '" with data length:', stlData ? stlData.length : 'undefined');
+    
+    if (!stlData) {
       throw new Error('No STL data provided');
     }
     
     if (!fileName) {
-      console.error(`[${new Date().toISOString()}] No filename provided`);
-      throw new Error('Filename is required');
+      fileName = `model-${Date.now()}.stl`;
+      console.log('[' + new Date().toISOString() + '] No filename provided, using generated name:', fileName);
     }
     
-    console.log(`[${new Date().toISOString()}] Storing STL file "${fileName}" with data length: ${stlBase64.length}`);
+    // Make sure the filename has an .stl extension
+    if (!fileName.toLowerCase().endsWith('.stl')) {
+      fileName += '.stl';
+      console.log('[' + new Date().toISOString() + '] Added .stl extension to filename:', fileName);
+    }
     
-    // Use Supabase storage
-    const result = await storeSTLInSupabase(stlBase64, fileName);
+    // Replace spaces and special characters in filename
+    const safeFileName = fileName.replace(/[^a-zA-Z0-9.-]/g, '-');
+    if (safeFileName !== fileName) {
+      console.log('[' + new Date().toISOString() + '] Sanitized filename from "' + fileName + '" to "' + safeFileName + '"');
+      fileName = safeFileName;
+    }
     
-    console.log(`[${new Date().toISOString()}] STL file stored successfully. Download URL: ${result.downloadUrl.substring(0, 100)}...`);
+    console.log('[' + new Date().toISOString() + '] Preparing to store STL file in Supabase Storage...');
     
-    return result;
+    // Process the STL data
+    console.log('[' + new Date().toISOString() + '] STL data type:', typeof stlData);
+    console.log('[' + new Date().toISOString() + '] STL data string preview:', stlData.substring(0, 80) + '...');
+    console.log('[' + new Date().toISOString() + '] STL data length:', stlData.length, 'characters');
     
+    let stlBuffer;
+    // Check if the data is already base64 or needs encoding
+    console.log('[' + new Date().toISOString() + '] Processing base64 STL data...');
+    try {
+      // Try to determine if it's a base64 string by checking for a common pattern
+      if (stlData.match(/^[A-Za-z0-9+/=]+$/)) {
+        console.log('[' + new Date().toISOString() + '] Using direct base64 data');
+        stlBuffer = Buffer.from(stlData, 'base64');
+      } else {
+        console.log('[' + new Date().toISOString() + '] Converting to base64 first');
+        stlBuffer = Buffer.from(stlData);
+      }
+      
+      console.log('[' + new Date().toISOString() + '] Converted base64 data to buffer of size:', stlBuffer.length, 'bytes');
+    } catch (error) {
+      console.error('[' + new Date().toISOString() + '] Error processing base64 data:', error.message);
+      throw new Error('Failed to process STL data: ' + error.message);
+    }
+    
+    console.log('[' + new Date().toISOString() + '] STL file size:', stlBuffer.length, 'bytes');
+    
+    // Create a UUID for uniqueness
+    const uuid = require('crypto').randomUUID ? 
+                 require('crypto').randomUUID() : 
+                 Date.now().toString(36) + Math.random().toString(36).substring(2);
+                 
+    // Create a timestamp-based directory structure
+    const now = new Date();
+    const year = now.getUTCFullYear();
+    const month = String(now.getUTCMonth() + 1).padStart(2, '0');
+    const day = String(now.getUTCDate()).padStart(2, '0');
+    const timestamp = Date.now();
+    
+    // Shorten UUID to 16 chars for filename
+    const shortId = uuid.replace(/-/g, '').substring(0, 16);
+    
+    // Create a temporary file path for the STL
+    const tempDir = path.join(os.tmpdir(), 'stl-uploads');
+    
+    // Create the directory if it doesn't exist
+    try {
+      fs.mkdirSync(tempDir, { recursive: true });
+    } catch (error) {
+      if (error.code !== 'EEXIST') {
+        throw error;
+      }
+    }
+    
+    const tempFilePath = path.join(tempDir, `${timestamp}-${shortId}-${fileName}`);
+    
+    // Write the STL data to the temporary file
+    console.log('[' + new Date().toISOString() + '] Writing STL data to temporary file:', tempFilePath);
+    
+    try {
+      // Use writeFileSync to ensure the file is completely written before proceeding
+      fs.writeFileSync(tempFilePath, stlBuffer);
+      console.log('[' + new Date().toISOString() + '] Temporary STL file created successfully');
+    } catch (error) {
+      console.error('[' + new Date().toISOString() + '] Error writing temporary STL file:', error.message);
+      throw new Error('Failed to create temporary STL file: ' + error.message);
+    }
+    
+    // Define the path in storage - use a timestamp and UUID to ensure uniqueness
+    const storagePath = `${year}/${month}/${day}/${timestamp}-${shortId}-${fileName}`;
+    console.log('[' + new Date().toISOString() + '] Supabase Storage path:', storagePath);
+    
+    // Upload to Supabase Storage
+    console.log('[' + new Date().toISOString() + '] Uploading to Supabase Storage bucket:', process.env.SUPABASE_STORAGE_BUCKET);
+    
+    try {
+      // Read the file in chunks for better memory management with large files
+      const fileStream = fs.createReadStream(tempFilePath);
+      
+      // Upload with appropriate content type for STL files
+      await supabase.storage
+        .from(process.env.SUPABASE_STORAGE_BUCKET)
+        .upload(storagePath, fileStream, {
+          contentType: 'application/vnd.ms-pki.stl',
+          upsert: true,
+          duplex: 'half' // This helps with certain stream issues
+        });
+      
+      console.log('[' + new Date().toISOString() + '] STL file uploaded successfully to Supabase Storage');
+    } catch (error) {
+      console.error('[' + new Date().toISOString() + '] Error uploading to Supabase Storage:', error.message);
+      
+      // Try again with a direct buffer upload if streaming failed
+      try {
+        console.log('[' + new Date().toISOString() + '] Retrying upload with direct buffer method...');
+        await supabase.storage
+          .from(process.env.SUPABASE_STORAGE_BUCKET)
+          .upload(storagePath, stlBuffer, {
+            contentType: 'application/vnd.ms-pki.stl',
+            upsert: true
+          });
+        console.log('[' + new Date().toISOString() + '] STL file uploaded successfully on retry');
+      } catch (retryError) {
+        console.error('[' + new Date().toISOString() + '] Retry upload also failed:', retryError.message);
+        throw new Error('Failed to upload STL file to storage: ' + error.message);
+      }
+    }
+    
+    // Create a signed URL valid for 10 years
+    const expirySeconds = 60 * 60 * 24 * 365 * 10; // 10 years in seconds
+    console.log('[' + new Date().toISOString() + '] Creating signed URL with ' + expirySeconds + ' seconds validity (10 years)');
+    console.log('[' + new Date().toISOString() + '] URL will expire on:', new Date(Date.now() + expirySeconds * 1000).toISOString());
+    
+    let signedUrlResponse;
+    try {
+      signedUrlResponse = await supabase.storage
+        .from(process.env.SUPABASE_STORAGE_BUCKET)
+        .createSignedUrl(storagePath, expirySeconds);
+      
+      if (signedUrlResponse.error) {
+        throw new Error(signedUrlResponse.error.message);
+      }
+      
+      console.log('[' + new Date().toISOString() + '] Signed URL successfully created. URL length:', signedUrlResponse.data.signedUrl.length);
+    } catch (error) {
+      console.error('[' + new Date().toISOString() + '] Error creating signed URL:', error.message);
+      throw new Error('Failed to create signed URL: ' + error.message);
+    }
+    
+    // Also get the public URL as a backup
+    const { data: { publicUrl } } = supabase.storage
+      .from(process.env.SUPABASE_STORAGE_BUCKET)
+      .getPublicUrl(storagePath);
+    
+    console.log('[' + new Date().toISOString() + '] Generated public URL:', publicUrl.substring(0, 70) + '...');
+    console.log('[' + new Date().toISOString() + '] Generated signed URL (valid for 10 years):', signedUrlResponse.data.signedUrl.substring(0, 70) + '...');
+    
+    // Clean up the temporary file
+    try {
+      fs.unlinkSync(tempFilePath);
+      console.log('[' + new Date().toISOString() + '] Temporary file deleted');
+    } catch (error) {
+      console.warn('[' + new Date().toISOString() + '] Failed to delete temporary file:', error.message);
+    }
+    
+    const downloadUrl = signedUrlResponse.data.signedUrl;
+    console.log('[' + new Date().toISOString() + '] STL file stored successfully. Download URL:', downloadUrl.substring(0, 70) + '...');
+    console.log('[' + new Date().toISOString() + '] STL file stored at ' + process.env.SUPABASE_STORAGE_BUCKET + '/' + storagePath);
+    console.log('[' + new Date().toISOString() + '] STL download URL length:', downloadUrl.length, 'characters');
+    
+    return {
+      fileName,
+      url: downloadUrl,
+      publicUrl,
+      path: storagePath,
+      size: stlBuffer.length
+    };
   } catch (error) {
-    console.error(`[${new Date().toISOString()}] Error storing STL file:`, error);
-    
-    // Create fallback URLs for development
-    if (process.env.NODE_ENV === 'development') {
-      console.log(`[${new Date().toISOString()}] Using development fallback URLs`);
-      
-      const host = process.env.BASE_URL || 'http://localhost:4002';
-      const timestamp = Date.now();
-      const mockDownloadUrl = `${host}/mock-stl-downloads/${timestamp}-${fileName}?error=true`;
-      
-      return {
-        downloadUrl: mockDownloadUrl,
-        publicUrl: mockDownloadUrl,
-        storagePath: `fallback/${timestamp}-${fileName}`,
-        fileName: fileName,
-        fileSize: stlBase64.length,
-        isFallback: true
-      };
-    }
-    
+    console.error('[' + new Date().toISOString() + '] Error in storeSTLFile:', error.message);
     throw error;
   }
 }
@@ -296,158 +439,142 @@ try {
 
 // Main checkout endpoint
 app.post('/api/checkout', async (req, res) => {
-  console.log(`[${new Date().toISOString()}] Checkout request received`);
-  
   try {
-    // Log body keys received for debugging
-    console.log(`[${new Date().toISOString()}] Request body keys:`, Object.keys(req.body));
+    console.log(`${new Date().toISOString()} - POST /api/checkout`);
+    console.log('[' + new Date().toISOString() + '] Checkout request received');
     
+    // Log the request body keys for debugging
+    console.log('[' + new Date().toISOString() + '] Request body keys:', Object.keys(req.body));
+    
+    // Extract request data with better error handling
     const { 
       stlBase64, 
       stlFileName, 
-      modelName, 
-      price, 
-      email,
-      // Optional parameters
-      dimensions,
-      material,
-      infillPercentage,
-      quantity = 1,
-      color
+      modelName = 'Untitled Model', 
+      dimensions = 'Unknown',
+      material = 'PLA', 
+      infillPercentage = 20,
+      price = 1999,  // Default to $19.99
+      email = ''
     } = req.body;
     
-    // Validate required parameters
-    if (!stlBase64) {
-      console.error(`[${new Date().toISOString()}] Missing STL data in request`);
-      return res.status(400).json({ success: false, message: 'Missing STL file data' });
+    // Validate required fields
+    if (!stlBase64 || !stlFileName) {
+      console.error('[' + new Date().toISOString() + '] Missing required fields: stlBase64 or stlFileName');
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Missing required fields: STL file data and filename are required' 
+      });
     }
     
-    if (!stlFileName) {
-      console.error(`[${new Date().toISOString()}] Missing STL filename in request`);
-      return res.status(400).json({ success: false, message: 'Missing STL filename' });
+    // Check if the file size is reasonable before processing
+    const estimatedSize = Math.ceil(stlBase64.length * 0.75); // Approximate base64 decoded size
+    console.log(`[${new Date().toISOString()}] Estimated STL size: ${estimatedSize} bytes`);
+    
+    // Set a high but reasonable limit (100MB)
+    const MAX_SIZE = 100 * 1024 * 1024;
+    if (estimatedSize > MAX_SIZE) {
+      console.error(`[${new Date().toISOString()}] STL file too large: ${estimatedSize} bytes`);
+      return res.status(400).json({
+        success: false,
+        error: 'STL file too large. Maximum size is 100MB.'
+      });
     }
     
-    if (!modelName) {
-      console.error(`[${new Date().toISOString()}] Missing model name in request`);
-      return res.status(400).json({ success: false, message: 'Missing model name' });
-    }
+    console.log('[' + new Date().toISOString() + '] Processing checkout for "' + modelName + '" (' + stlFileName + ')');
     
-    if (!price) {
-      console.error(`[${new Date().toISOString()}] Missing price in request`);
-      return res.status(400).json({ success: false, message: 'Missing price' });
-    }
+    // Upload STL file to storage
+    console.log('[' + new Date().toISOString() + '] Uploading STL file...');
     
-    if (!email) {
-      console.error(`[${new Date().toISOString()}] Missing email in request`);
-      return res.status(400).json({ success: false, message: 'Missing email address' });
-    }
-    
-    console.log(`[${new Date().toISOString()}] Processing checkout for "${modelName}" (${stlFileName})`);
-    
-    // Store the STL file
+    // Process STL file for storage
     let stlFile;
     try {
-      console.log(`[${new Date().toISOString()}] Uploading STL file...`);
       stlFile = await storeSTLFile(stlBase64, stlFileName);
-      console.log(`[${new Date().toISOString()}] STL file stored at ${stlFile.storagePath}`);
-      console.log(`[${new Date().toISOString()}] STL download URL length: ${stlFile.downloadUrl.length} characters`);
-    } catch (stlError) {
-      console.error(`[${new Date().toISOString()}] Error storing STL file:`, stlError);
+      if (!stlFile || !stlFile.url) {
+        throw new Error('Failed to store STL file');
+      }
+    } catch (error) {
+      console.error('[' + new Date().toISOString() + '] Error storing STL file:', error.message);
       return res.status(500).json({ 
         success: false, 
-        message: 'Error processing STL file', 
-        error: stlError.message
+        error: 'Failed to store STL file: ' + error.message 
       });
     }
     
+    // Create formatted item description
+    const modelDescription = formatModelDescription(modelName, dimensions, material, infillPercentage);
+    
+    // Create Stripe checkout session
+    console.log('[' + new Date().toISOString() + '] Creating Stripe checkout session...');
+    console.log('[' + new Date().toISOString() + '] Description length:', modelDescription.length, 'characters');
+    
+    // Create metadata object ensuring we stay under Stripe's limits
+    const metadata = {
+      stlFileName: stlFileName.substring(0, 40), // Limit length to avoid Stripe metadata issues
+      stlUrl: stlFile.url.substring(0, 500),  // Limit to 500 chars to avoid Stripe metadata issues
+      material,
+      dimensions,
+      infill: `${infillPercentage}%`,
+      customerEmail: email || 'not provided'
+    };
+    
+    // Keep the total metadata under Stripe's limit
+    const metadataSize = JSON.stringify(metadata).length;
+    console.log(`[${new Date().toISOString()}] Metadata size: ${metadataSize} bytes`);
+    
+    if (metadataSize > 50000) { // Stripe's metadata limit
+      // Trim the URL if necessary to fit within limits
+      const urlLength = metadata.stlUrl.length;
+      const excessBytes = metadataSize - 50000 + 100; // 100 bytes buffer
+      const newUrlLength = Math.max(100, urlLength - excessBytes);
+      metadata.stlUrl = metadata.stlUrl.substring(0, newUrlLength) + '...';
+      console.log(`[${new Date().toISOString()}] Trimmed URL to fit within Stripe metadata limits`);
+    }
+    
     try {
-      // Create a Stripe checkout session
-      console.log(`[${new Date().toISOString()}] Creating Stripe checkout session...`);
-      
-      // Format product price (Stripe expects integer in cents)
-      const unitAmount = Math.round(parseFloat(price) * 100);
-      
-      // Construct product description - Keep it shorter for Stripe compatibility
-      let description = `3D Print: ${modelName}`;
-      if (color) description += `, Color: ${color}`;
-      
-      // Prepare a shorter version of the URL for Stripe description if needed
-      let displayUrl = stlFile.downloadUrl;
-      
-      // Add the STL download URL to the description with a cleaner format
-      // Stripe has character limits, so we need to be careful with long URLs
-      if (process.env.NODE_ENV === 'production') {
-        // For production, use a more compact description format
-        console.log(`[${new Date().toISOString()}] Using production-optimized description format`);
-        description += `\n\n🔗 DOWNLOAD YOUR 3D MODEL:\n${displayUrl}\n\nThis download link is valid for 10 years. Save it somewhere safe!`;
-      } else {
-        // For development/testing, use the full URL
-        description += `\n\n🔗 DOWNLOAD YOUR 3D MODEL:\n${displayUrl}\n\nThis download link is valid for 10 years. Save it somewhere safe!`;
-      }
-      
-      console.log(`[${new Date().toISOString()}] Description length: ${description.length} characters`);
-      
-      // Create line item for Stripe
-      const lineItem = {
-        price_data: {
-          currency: 'usd',
-          product_data: {
-            name: modelName,
-            description: description,
-            metadata: {
-              stlUrl: stlFile.downloadUrl,
-              fileName: stlFile.fileName
-            },
-          },
-          unit_amount: unitAmount,
-        },
-        quantity: quantity || 1,
-      };
-      
-      // Create Stripe session with the line item
       const session = await stripe.checkout.sessions.create({
         payment_method_types: ['card'],
-        line_items: [lineItem],
+        line_items: [{
+          price_data: {
+            currency: 'usd',
+            product_data: {
+              name: `3D Print: ${modelName}`,
+              description: modelDescription,
+            },
+            unit_amount: price, // in cents
+          },
+          quantity: 1,
+        }],
         mode: 'payment',
-        success_url: `${process.env.BASE_URL || 'http://localhost:3000'}/checkout/success?session_id={CHECKOUT_SESSION_ID}`,
-        cancel_url: `${process.env.BASE_URL || 'http://localhost:3000'}/checkout/cancel`,
-        customer_email: email,
-        metadata: {
-          stlUrl: stlFile.downloadUrl,
-          stlFileName: stlFile.fileName,
-          productName: modelName,
-          color: color || 'Not specified',
-          urlValidity: '10 years',
-          downloadInstructions: "Your STL file download link is valid for 10 years. Save it somewhere safe!"
-        }
+        success_url: `${process.env.CLIENT_URL || 'http://localhost:3000'}/checkout/success?session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url: `${process.env.CLIENT_URL || 'http://localhost:3000'}/checkout/cancel`,
+        metadata: metadata
       });
       
-      console.log(`[${new Date().toISOString()}] Stripe checkout session created successfully. Session ID: ${session.id}`);
+      console.log('[' + new Date().toISOString() + '] Stripe checkout session created successfully. Session ID:', session.id);
       
-      // Return the session ID and URL to the client
-      res.json({
+      // Send the response with both session ID and URL
+      res.status(200).json({
         success: true,
         id: session.id,
         url: session.url,
         stlInfo: {
-          url: stlFile.downloadUrl,
+          url: stlFile.url,
           fileName: stlFile.fileName
         }
       });
     } catch (error) {
-      console.error(`[${new Date().toISOString()}] Error creating Stripe checkout session:`, error);
-      res.status(500).json({
-        success: false,
-        message: 'Error creating Stripe checkout session',
-        error: error.message
+      console.error('[' + new Date().toISOString() + '] Error creating checkout session:', error.message);
+      res.status(500).json({ 
+        success: false, 
+        error: 'Failed to create checkout session: ' + error.message 
       });
     }
   } catch (error) {
-    console.error(`[${new Date().toISOString()}] Error processing checkout:`, error);
-    res.status(500).json({
-      success: false,
-      message: 'Error processing checkout',
-      error: error.message
+    console.error('[' + new Date().toISOString() + '] Unexpected error in checkout endpoint:', error.message);
+    res.status(500).json({ 
+      success: false, 
+      error: 'Server error processing checkout request: ' + error.message 
     });
   }
 });
