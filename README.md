@@ -81,3 +81,39 @@ If you encounter any issues with Firestore:
 2. Run the Firestore test: `npm run test:firestore`
 3. Check if the Firebase console shows your project is properly set up
 4. Verify that your Firebase rules allow read/write access to your collections 
+
+# Supabase Storage Integration
+
+The application has been updated to use Supabase for STL file storage instead of Firebase. This provides a more streamlined storage solution with simplified permission management.
+
+## Storage Implementation
+
+- STL files are stored in a Supabase bucket named `stl-files`
+- Files are organized by date (YYYY/MM/DD) with a unique timestamp-based ID
+- Storage operations are handled by the `server/supabase-storage.cjs` utility
+
+## Testing the Integration
+
+Two test scripts are available to verify the storage and checkout integrations:
+
+1. `scripts/test-supabase-upload.js` - Tests direct upload to Supabase Storage
+2. `scripts/test-upload-and-checkout.js` - Tests the full checkout process with STL upload
+
+Run the scripts using Node.js:
+
+```bash
+node scripts/test-supabase-upload.js
+node scripts/test-upload-and-checkout.js
+```
+
+## Configuration
+
+The Supabase integration requires the following environment variables in `.env.local`:
+
+```
+SUPABASE_URL=your-project-url
+SUPABASE_SERVICE_KEY=your-service-role-api-key
+SUPABASE_ANON_KEY=your-anon-api-key
+```
+
+The bucket setup and CORS configuration are handled by the `scripts/create-supabase-bucket.js` script. 

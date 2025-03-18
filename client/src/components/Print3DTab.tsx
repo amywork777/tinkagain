@@ -830,7 +830,7 @@ const Print3DTab = () => {
       const colorName = selectedColor ? selectedColor.name : "Unknown Color";
 
       // Prepare the checkout data
-      const checkoutData = {
+      const checkoutPayload = {
         modelName,
         color: colorName,
         quantity: quantity,
@@ -839,18 +839,24 @@ const Print3DTab = () => {
         email: "guest@example.com", // Replace with actual email if available
         type: "3d_print", // Specify this is a 3D print checkout
         stlFileName,
-        stlFileData // Send the STL data for the server to store
+        stlBase64: stlFileData, // Use stlBase64 as the server expects this property name
+        is3DPrint: true,
+        productType: '3d_print',
+        clientTimestamp: new Date().toISOString(),
+        dimensions: "Unknown",
+        material: colorName,
+        infillPercentage: 20
       };
 
       console.log(`[${new Date().toISOString()}] CHECKOUT DATA PREPARED:`, {
-        modelName: checkoutData.modelName,
-        color: checkoutData.color,
-        quantity: checkoutData.quantity,
-        finalPrice: checkoutData.finalPrice,
-        hasStlFileData: !!checkoutData.stlFileData,
-        stlFileDataLength: checkoutData.stlFileData ? checkoutData.stlFileData.length : 0,
-        stlFileName: checkoutData.stlFileName,
-        type: checkoutData.type,
+        modelName: checkoutPayload.modelName,
+        color: checkoutPayload.color,
+        quantity: checkoutPayload.quantity,
+        finalPrice: checkoutPayload.finalPrice,
+        hasStlFileData: !!checkoutPayload.stlBase64,
+        stlBase64Length: checkoutPayload.stlBase64 ? checkoutPayload.stlBase64.length : 0,
+        stlFileName: checkoutPayload.stlFileName,
+        type: checkoutPayload.type,
         timestamp: new Date().toISOString()
       });
 
@@ -889,44 +895,99 @@ const Print3DTab = () => {
           });
 
           setIsLoading(false);
-          return;
+          return null;
         }
 
-        const endpoint = possibleEndpoints[index];
-        console.log(`[${new Date().toISOString()}] CHECKOUT ATTEMPT ${index + 1}/${possibleEndpoints.length}: Trying endpoint: ${endpoint}`);
+        // Focus on the primary checkout endpoint first with a more specific format
+        const endpoint = `${domainBase}/api/checkout`;
+        console.log(`[${new Date().toISOString()}] CHECKOUT REQUEST: Sending to ${endpoint}`);
+        console.log(`[${new Date().toISOString()}] CHECKOUT STL DATA: ${stlFileData ? 'Present (length: ' + stlFileData.length + ')' : 'Missing'}`);
 
         try {
           // Add cache-busting parameter to avoid cached responses
           const cacheBuster = `?_=${Date.now()}`;
           const endpointWithCache = `${endpoint}${cacheBuster}`;
 
-          // Send the checkout request
+          // Ensure we're sending the STL data with the correct property name
+          const requestPayload = {
+            modelName,
+            color: colorName,
+            quantity,
+            finalPrice,
+            userId: "guest",
+            email: "guest@example.com",
+            type: "3d_print",
+            stlFileName,
+            // For the server endpoint, rename to match what it expects
+            stlBase64: stlFileData, // Use stlBase64 as the server expects this property name
+            is3DPrint: true,
+            productType: '3d_print',
+            clientTimestamp: new Date().toISOString(),
+            // Required fields for the server
+            dimensions: "10x10x10",
+            material: colorName || "PLA",
+            infillPercentage: 20,
+            price: finalPrice
+          };
+
+          console.log(`[${new Date().toISOString()}] CHECKOUT PAYLOAD KEYS:`, Object.keys(requestPayload));
+          
+          // Use a one-time attempt, not multiple rapid requests
           const response = await fetch(endpointWithCache, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
-              'X-Checkout-Type': '3d_print', // Custom header to identify the checkout type
-              'X-Client-Timestamp': new Date().toISOString() // Timestamp for debugging
+              'X-Checkout-Type': '3d_print',
+              'X-Client-Timestamp': new Date().toISOString(),
+              'X-Client-Browser': navigator.userAgent
             },
-            body: JSON.stringify({
-              ...checkoutData,
-              is3DPrint: true, // Explicit flag to indicate 3D print checkout
-              productType: '3d_print', // Another explicit flag
-              clientTimestamp: new Date().toISOString()
-            })
+            body: JSON.stringify(requestPayload)
           });
 
           console.log(`[${new Date().toISOString()}] CHECKOUT RESPONSE STATUS: ${response.status} from endpoint ${endpoint}`);
 
           // Handle non-success responses
           if (!response.ok) {
-            const errorText = await response.text();
+            // Try to get error text
+            let errorText = '';
+            try {
+              errorText = await response.text();
+            } catch (e) {
+              errorText = 'Could not read error response';
+            }
+            
             console.error(`[${new Date().toISOString()}] CHECKOUT ERROR RESPONSE: ${errorText}`);
 
-            // If we got a server error (5xx), try the next endpoint
-            if (response.status >= 500) {
-              console.log(`[${new Date().toISOString()}] CHECKOUT RETRY: Server error, trying next endpoint`);
-              return tryEndpoints(index + 1);
+            // If we got a server error, try the debug endpoint as fallback
+            if (response.status >= 500 || response.status === 400) {
+              console.log(`[${new Date().toISOString()}] CHECKOUT RETRY: Server error, trying debug endpoint`);
+              
+              // Try debug endpoint which is more forgiving
+              const debugEndpoint = `${domainBase}/api/debug-checkout${cacheBuster}`;
+              
+              console.log(`[${new Date().toISOString()}] SENDING TO DEBUG ENDPOINT: ${debugEndpoint}`);
+              
+              const debugResponse = await fetch(debugEndpoint, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'X-Checkout-Type': '3d_print',
+                },
+                body: JSON.stringify(requestPayload)
+              });
+              
+              if (!debugResponse.ok) {
+                toast({
+                  title: "Checkout error",
+                  description: `Server error: ${debugResponse.status}. Please try again.`,
+                  variant: "destructive",
+                });
+                setIsLoading(false);
+                return null;
+              }
+              
+              // Use the debug response if available
+              return await debugResponse.json();
             }
 
             // For client errors (4xx), show the error
@@ -937,38 +998,96 @@ const Print3DTab = () => {
             });
 
             setIsLoading(false);
-            return;
+            return null;
           }
 
           // Parse the response
-          const data = await response.json();
-          console.log(`[${new Date().toISOString()}] CHECKOUT SUCCESS RESPONSE:`, data);
-
-          // Check if we have a checkout URL
-          if (data.url) {
-            console.log(`[${new Date().toISOString()}] CHECKOUT REDIRECT: Redirecting to: ${data.url}`);
-            // Redirect to the checkout page
-            window.location.href = data.url;
-          } else {
-            console.error(`[${new Date().toISOString()}] CHECKOUT ERROR: Missing checkout URL in response`);
-            toast({
-              title: "Checkout error",
-              description: "Invalid response from server. Please try again.",
-              variant: "destructive",
-            });
-            setIsLoading(false);
-          }
+          return await response.json();
+          
         } catch (error) {
           console.error(`[${new Date().toISOString()}] CHECKOUT FETCH ERROR:`, error);
-
-          // Try the next endpoint
-          console.log(`[${new Date().toISOString()}] CHECKOUT RETRY: Fetch error, trying next endpoint`);
-          return tryEndpoints(index + 1);
+          toast({
+            title: "Connection error",
+            description: "Could not connect to checkout service. Please check your internet connection and try again.",
+            variant: "destructive",
+          });
+          setIsLoading(false);
+          return null;
         }
       };
 
-      // Start trying endpoints
-      tryEndpoints();
+      // Execute the checkout process
+      (async () => {
+        const responseData = await tryEndpoints();
+        
+        // Handle successful checkout data here
+        if (responseData && responseData.url) {
+          console.log(`[${new Date().toISOString()}] CHECKOUT SUCCESS RESPONSE:`, responseData);
+          
+          // Stop loading state
+          setIsLoading(false);
+          
+          // First attempt - try to open the URL directly (may be blocked by browser)
+          try {
+            // Save URL for fallback methods
+            const checkoutUrl = responseData.url;
+            console.log(`[${new Date().toISOString()}] CHECKOUT URL: ${checkoutUrl}`);
+            
+            // Try opening in a new window/tab
+            const newWindow = window.open(checkoutUrl, '_blank');
+            
+            // If opening the window failed or was blocked
+            if (!newWindow || newWindow.closed || typeof newWindow.closed === 'undefined') {
+              console.log(`[${new Date().toISOString()}] CHECKOUT DIRECT OPEN BLOCKED: Falling back to user-initiated options`);
+            } else {
+              console.log(`[${new Date().toISOString()}] CHECKOUT WINDOW OPENED SUCCESSFULLY`);
+            }
+            
+            // Show a more prominent persistent notification with checkout link (even if window opened successfully)
+            toast({
+              title: "Checkout Ready",
+              description: "Your 3D model was uploaded successfully! Click below to complete your purchase.",
+              action: (
+                <Button 
+                  className="bg-green-600 hover:bg-green-700 text-white font-bold"
+                  onClick={() => window.open(checkoutUrl, '_blank')}
+                >
+                  Go to Checkout
+                </Button>
+              ),
+              duration: 60000, // Keep it visible for 1 minute
+            });
+            
+          } catch (openError) {
+            console.error(`[${new Date().toISOString()}] CHECKOUT OPEN ERROR:`, openError);
+            
+            // Show error toast with the checkout URL
+            toast({
+              title: "Browser blocked redirect",
+              description: "Please click the button below to continue to checkout",
+              action: (
+                <Button 
+                  className="bg-primary hover:bg-primary/90 text-white font-bold"
+                  onClick={() => window.open(responseData.url, '_blank')}
+                >
+                  Go to Checkout
+                </Button>
+              ),
+              duration: 60000, // Keep it visible for 1 minute
+            });
+          }
+        } else {
+          // Handle checkout error
+          console.error(`[${new Date().toISOString()}] CHECKOUT ERROR: No valid response data or URL`);
+          setIsLoading(false);
+          
+          toast({
+            title: "Checkout failed",
+            description: "We couldn't process your checkout request. Please try again later.",
+            variant: "destructive",
+          });
+        }
+      })();
     };
 
     try {

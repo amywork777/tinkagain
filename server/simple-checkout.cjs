@@ -7,7 +7,6 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const crypto = require('crypto');
-const admin = require('firebase-admin');
 
 // Load environment variables first
 dotenv.config({ path: path.resolve(process.cwd(), '.env.local') });
@@ -16,41 +15,19 @@ console.log(`[${new Date().toISOString()}] Starting Stripe checkout server...`);
 console.log(`[${new Date().toISOString()}] Environment: ${process.env.NODE_ENV}`);
 console.log(`[${new Date().toISOString()}] Using Stripe key: ${process.env.STRIPE_SECRET_KEY ? (process.env.STRIPE_SECRET_KEY.startsWith('sk_test') ? 'TEST MODE' : 'LIVE MODE') : 'MISSING'}`);
 
-// Initialize Firebase Admin SDK if not already initialized
-let firebaseInitialized = false;
-if (!admin.apps.length) {
-  try {
-    // Get the Firebase configuration from environment variables
-    const privateKey = process.env.FIREBASE_PRIVATE_KEY 
-      ? process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n') 
-      : undefined;
-    
-    // Debug Firebase initialization params
-    console.log(`[${new Date().toISOString()}] Firebase initialization parameters:`, {
-      projectId: process.env.FIREBASE_PROJECT_ID ? 'Present' : 'Missing',
-      privateKey: privateKey ? 'Present' : 'Missing',
-      clientEmail: process.env.FIREBASE_CLIENT_EMAIL ? 'Present' : 'Missing',
-      storageBucket: process.env.FIREBASE_STORAGE_BUCKET || 'Using default: taiyaki-test1.appspot.com'
-    });
-    
-    if (!process.env.FIREBASE_PROJECT_ID || !privateKey || !process.env.FIREBASE_CLIENT_EMAIL) {
-      console.log(`[${new Date().toISOString()}] Warning: Missing required Firebase configuration. STL upload will not work.`);
-    } else {
-      admin.initializeApp({
-        credential: admin.credential.cert({
-          projectId: process.env.FIREBASE_PROJECT_ID,
-          privateKey: privateKey,
-          clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-        }),
-        storageBucket: process.env.FIREBASE_STORAGE_BUCKET || 'taiyaki-test1.appspot.com'
-      });
-      
-      firebaseInitialized = true;
-      console.log(`[${new Date().toISOString()}] Firebase Admin SDK initialized successfully`);
-    }
-  } catch (error) {
-    console.error(`[${new Date().toISOString()}] Error initializing Firebase:`, error);
-  }
+// Import Supabase storage utilities instead of Firebase
+const { storeSTLInSupabase } = require('./supabase-storage.cjs');
+
+// Replace Firebase admin initialization with Supabase config check
+let storageType = 'none';
+
+// Check if we have Supabase credentials
+if (process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_KEY) {
+  console.log('Supabase configuration found. Using Supabase for STL storage.');
+  storageType = 'Supabase';
+} else {
+  console.log('No Supabase credentials found. Using fallback storage.');
+  storageType = 'Fallback';
 }
 
 // Initialize Stripe with the loaded secret key
@@ -94,17 +71,13 @@ app.use((req, res, next) => {
   next();
 });
 
-// Health check endpoint
+// Replace the health check endpoint to show Supabase status
 app.get('/api/health', (req, res) => {
-  const stripeMode = process.env.STRIPE_SECRET_KEY ? 
-    (process.env.STRIPE_SECRET_KEY.startsWith('sk_test') ? 'TEST MODE' : 'LIVE MODE') : 
-    'MISSING KEY';
-  
-  res.json({ 
-    status: 'ok', 
-    message: 'Checkout server is running',
-    stripeMode,
-    environment: process.env.NODE_ENV
+  res.json({
+    status: 'ok',
+    environment: process.env.NODE_ENV || 'development',
+    stripe: !!process.env.STRIPE_SECRET_KEY ? 'configured' : 'missing',
+    storage: storageType
   });
 });
 
@@ -116,6 +89,7 @@ app.post('/api/debug-checkout', (req, res) => {
     message: 'Debug checkout endpoint working',
     environment: process.env.NODE_ENV,
     stripeMode: process.env.STRIPE_SECRET_KEY?.startsWith('sk_test') ? 'TEST MODE' : 'LIVE MODE',
+    storage: storageType,
     body: req.body
   });
 });
@@ -251,354 +225,205 @@ app.post('/api/webhook', async (req, res) => {
   }
 });
 
-/**
- * Stores STL data in Firebase Storage
- * @param {string|Buffer} stlData - The STL data to store, either as a base64 string or Buffer
- * @param {string} fileName - The name of the STL file
- * @returns {Promise<{downloadUrl: string, publicUrl: string, storagePath: string, fileName: string, fileSize: number}>}
- */
-async function storeSTLInFirebase(stlData, fileName) {
-  console.log(`[${new Date().toISOString()}] Preparing to store STL file in Firebase Storage...`);
-  
-  // Check if Firebase is initialized
-  if (!firebaseInitialized) {
-    console.error(`[${new Date().toISOString()}] Firebase not initialized, cannot upload STL`);
-    throw new Error('Firebase Storage not initialized');
-  }
-  
-  // Debug the type of stlData
-  console.log(`[${new Date().toISOString()}] STL data type: ${typeof stlData}`);
-  if (typeof stlData === 'string') {
-    console.log(`[${new Date().toISOString()}] STL data string preview: ${stlData.substring(0, 100)}...`);
-    console.log(`[${new Date().toISOString()}] STL data length: ${stlData.length} characters`);
-  } else if (Buffer.isBuffer(stlData)) {
-    console.log(`[${new Date().toISOString()}] STL data is a Buffer of size: ${stlData.length} bytes`);
-  } else {
-    console.log(`[${new Date().toISOString()}] STL data is of unexpected type: ${typeof stlData}`);
-  }
-  
-  let tempFilePath;
+// Update the storeSTLFile function to use Supabase
+async function storeSTLFile(stlBase64, fileName) {
+  console.log(`[${new Date().toISOString()}] Processing STL file storage request for ${fileName}`);
   
   try {
-    // Create a safe filename (replace spaces and special chars)
-    const safeFileName = fileName.replace(/[^a-zA-Z0-9.-]/g, '_');
-    
-    // Process the STL data
-    let stlBuffer;
-    console.log(`[${new Date().toISOString()}] Processing ${typeof stlData === 'string' ? 'base64' : 'buffer'} STL data...`);
-    
-    if (typeof stlData === 'string') {
-      // If stlData is a base64 string, convert it to buffer
-      let base64Data;
-      
-      // Check if the data is a data URL (starts with data:)
-      if (stlData.startsWith('data:')) {
-        console.log(`[${new Date().toISOString()}] Detected data URL format, extracting base64 content`);
-        // Extract the base64 part if it's a data URL
-        const parts = stlData.split(',');
-        if (parts.length >= 2) {
-          base64Data = parts[1];
-          console.log(`[${new Date().toISOString()}] Successfully extracted base64 data of length: ${base64Data.length} characters`);
-        } else {
-          console.error(`[${new Date().toISOString()}] Invalid data URL format`);
-          base64Data = stlData; // Use as is if splitting failed
-        }
-      } else {
-        console.log(`[${new Date().toISOString()}] Using direct base64 data`);
-        // Assume it's already base64
-        base64Data = stlData.replace(/^base64,/, '');
-      }
-      
-      try {
-        stlBuffer = Buffer.from(base64Data, 'base64');
-        console.log(`[${new Date().toISOString()}] Converted base64 data to buffer of size: ${stlBuffer.length} bytes`);
-      } catch (bufferError) {
-        console.error(`[${new Date().toISOString()}] Failed to convert base64 to buffer:`, bufferError);
-        throw new Error(`Failed to process STL data: ${bufferError.message}`);
-      }
-    } else if (Buffer.isBuffer(stlData)) {
-      stlBuffer = stlData;
-      console.log(`[${new Date().toISOString()}] Using provided buffer data of size: ${stlBuffer.length} bytes`);
-    } else {
-      console.error(`[${new Date().toISOString()}] Unsupported STL data format: ${typeof stlData}`);
-      throw new Error(`Unsupported STL data format: ${typeof stlData}`);
+    if (!stlBase64) {
+      console.error(`[${new Date().toISOString()}] No STL data provided`);
+      throw new Error('No STL data provided');
     }
     
-    const fileSize = stlBuffer.length;
-    console.log(`[${new Date().toISOString()}] STL file size: ${fileSize} bytes`);
-    
-    // Write to a temporary file
-    const timestamp = Date.now();
-    const uniqueId = crypto.randomBytes(8).toString('hex');
-    const tempDir = path.join(os.tmpdir(), 'stl-uploads');
-    if (!fs.existsSync(tempDir)) {
-      fs.mkdirSync(tempDir, { recursive: true });
-    }
-    tempFilePath = path.join(tempDir, `${timestamp}-${uniqueId}-${safeFileName}`);
-    
-    console.log(`[${new Date().toISOString()}] Writing STL data to temporary file: ${tempFilePath}`);
-    fs.writeFileSync(tempFilePath, stlBuffer);
-    console.log(`[${new Date().toISOString()}] Temporary STL file created successfully`);
-    
-    // Create a path in Firebase Storage organized by date (YYYY/MM/DD)
-    const now = new Date();
-    const year = now.getFullYear();
-    const month = String(now.getMonth() + 1).padStart(2, '0');
-    const day = String(now.getDate()).padStart(2, '0');
-    
-    const storagePath = `stl-files/${year}/${month}/${day}/${timestamp}-${uniqueId}-${safeFileName}`;
-    console.log(`[${new Date().toISOString()}] Firebase Storage path: ${storagePath}`);
-    
-    // Get the bucket from Firebase storage
-    const bucket = admin.storage().bucket();
-    if (!bucket) {
-      throw new Error('Firebase Storage bucket not available');
+    if (!fileName) {
+      console.error(`[${new Date().toISOString()}] No filename provided`);
+      throw new Error('Filename is required');
     }
     
-    console.log(`[${new Date().toISOString()}] Uploading to Firebase Storage bucket: ${bucket.name}`);
+    console.log(`[${new Date().toISOString()}] Storing STL file "${fileName}" with data length: ${stlBase64.length}`);
     
-    // Set metadata including content type
-    const metadata = {
-      contentType: 'model/stl',  // Updated to correct MIME type for STL files
-      cacheControl: 'public, max-age=31536000', // Cache for 1 year
-      metadata: {
-        originalFileName: fileName
-      }
-    };
+    // Use Supabase storage
+    const result = await storeSTLInSupabase(stlBase64, fileName);
     
-    // Upload file with metadata
-    await bucket.upload(tempFilePath, {
-      destination: storagePath,
-      metadata: metadata
-    });
+    console.log(`[${new Date().toISOString()}] STL file stored successfully. Download URL: ${result.downloadUrl.substring(0, 100)}...`);
     
-    console.log(`[${new Date().toISOString()}] STL file uploaded successfully to Firebase Storage`);
-    
-    // Get URLs - don't try to set ACLs since uniform bucket-level access is enabled
-    const [signedUrl] = await bucket.file(storagePath).getSignedUrl({
-      action: 'read',
-      expires: Date.now() + 315360000000, // 10 years in milliseconds
-    });
-    
-    // Also get a permanent public URL (though this depends on bucket permissions)
-    const publicUrl = `https://storage.googleapis.com/${bucket.name}/${storagePath}`;
-    
-    console.log(`[${new Date().toISOString()}] Generated public URL: ${publicUrl.substring(0, 100)}...`);
-    console.log(`[${new Date().toISOString()}] Generated signed URL (expires in 10 years): ${signedUrl.substring(0, 100)}...`);
-    
-    // Clean up the temporary file
-    try {
-      if (tempFilePath && fs.existsSync(tempFilePath)) {
-        fs.unlinkSync(tempFilePath);
-        console.log(`[${new Date().toISOString()}] Temporary file deleted`);
-      }
-    } catch (cleanupError) {
-      console.error(`[${new Date().toISOString()}] Error deleting temporary file:`, cleanupError);
-    }
-    
-    return {
-      downloadUrl: signedUrl,
-      publicUrl: publicUrl,
-      storagePath: storagePath,
-      fileName: safeFileName,
-      fileSize: fileSize
-    };
+    return result;
     
   } catch (error) {
-    // Clean up temporary file in case of error
-    if (tempFilePath && fs.existsSync(tempFilePath)) {
-      try {
-        fs.unlinkSync(tempFilePath);
-        console.log(`[${new Date().toISOString()}] Temporary file deleted`);
-      } catch (cleanupError) {
-        console.error(`[${new Date().toISOString()}] Error deleting temporary file:`, cleanupError);
-      }
+    console.error(`[${new Date().toISOString()}] Error storing STL file:`, error);
+    
+    // Create fallback URLs for development
+    if (process.env.NODE_ENV === 'development') {
+      console.log(`[${new Date().toISOString()}] Using development fallback URLs`);
+      
+      const host = process.env.BASE_URL || 'http://localhost:4002';
+      const timestamp = Date.now();
+      const mockDownloadUrl = `${host}/mock-stl-downloads/${timestamp}-${fileName}?error=true`;
+      
+      return {
+        downloadUrl: mockDownloadUrl,
+        publicUrl: mockDownloadUrl,
+        storagePath: `fallback/${timestamp}-${fileName}`,
+        fileName: fileName,
+        fileSize: stlBase64.length,
+        isFallback: true
+      };
     }
     
-    console.error(`[${new Date().toISOString()}] STL storage error:`, error);
-    throw new Error(`Firebase upload failed: ${error.message}`);
+    throw error;
   }
 }
 
 // Main checkout endpoint
-app.post(['/api/checkout', '/api/create-checkout-session', '/api/print/create-checkout-session'], async (req, res) => {
+app.post('/api/checkout', async (req, res) => {
+  console.log(`[${new Date().toISOString()}] Checkout request received`);
+  
   try {
-    console.log(`[${new Date().toISOString()}] Received checkout request:`, {
-      type: req.body.type || 'unknown',
-      is3DPrint: req.body.is3DPrint,
-      modelName: req.body.modelName,
-      color: req.body.color,
-      quantity: req.body.quantity,
-      price: req.body.price || req.body.finalPrice,
-      hasStlFileData: !!req.body.stlFileData,
-      stlFileName: req.body.stlFileName,
-      // Log the size of stlFileData if it exists but don't log the actual data which could be large
-      stlFileDataSize: req.body.stlFileData ? (typeof req.body.stlFileData === 'string' ? req.body.stlFileData.length : 'unknown') : 'none'
-    });
-
-    if (!req.body.modelName || !req.body.color || !req.body.quantity || !req.body.price && !req.body.finalPrice) {
-      console.error(`[${new Date().toISOString()}] Missing required checkout parameters`);
-      return res.status(400).json({
-        success: false,
-        message: 'Missing required checkout information'
+    // Log body keys received for debugging
+    console.log(`[${new Date().toISOString()}] Request body keys:`, Object.keys(req.body));
+    
+    const { 
+      stlBase64, 
+      stlFileName, 
+      modelName, 
+      price, 
+      email,
+      // Optional parameters
+      dimensions,
+      material,
+      infillPercentage,
+      quantity = 1,
+      color
+    } = req.body;
+    
+    // Validate required parameters
+    if (!stlBase64) {
+      console.error(`[${new Date().toISOString()}] Missing STL data in request`);
+      return res.status(400).json({ success: false, message: 'Missing STL file data' });
+    }
+    
+    if (!stlFileName) {
+      console.error(`[${new Date().toISOString()}] Missing STL filename in request`);
+      return res.status(400).json({ success: false, message: 'Missing STL filename' });
+    }
+    
+    if (!modelName) {
+      console.error(`[${new Date().toISOString()}] Missing model name in request`);
+      return res.status(400).json({ success: false, message: 'Missing model name' });
+    }
+    
+    if (!price) {
+      console.error(`[${new Date().toISOString()}] Missing price in request`);
+      return res.status(400).json({ success: false, message: 'Missing price' });
+    }
+    
+    if (!email) {
+      console.error(`[${new Date().toISOString()}] Missing email in request`);
+      return res.status(400).json({ success: false, message: 'Missing email address' });
+    }
+    
+    console.log(`[${new Date().toISOString()}] Processing checkout for "${modelName}" (${stlFileName})`);
+    
+    // Store the STL file
+    let stlFile;
+    try {
+      console.log(`[${new Date().toISOString()}] Uploading STL file...`);
+      stlFile = await storeSTLFile(stlBase64, stlFileName);
+      console.log(`[${new Date().toISOString()}] STL file stored at ${stlFile.storagePath}`);
+    } catch (stlError) {
+      console.error(`[${new Date().toISOString()}] Error storing STL file:`, stlError);
+      return res.status(500).json({ 
+        success: false, 
+        message: 'Error processing STL file', 
+        error: stlError.message
       });
     }
-
-    // Extract checkout information
-    const modelName = req.body.modelName;
-    const color = req.body.color;
-    const quantity = req.body.quantity;
-    const finalPrice = req.body.price || req.body.finalPrice;
-    const stlFileData = req.body.stlFileData;
-    const stlFileName = req.body.stlFileName || 'model.stl';
     
-    // Variables to store Firebase upload results
-    let stlDownloadUrl = '';
-    let stlPublicUrl = '';
-    let stlStoragePath = '';
-    let stlFileSize = 0;
-    let stlFileUploaded = false;
-    
-    // Upload STL file to Firebase if provided
-    if (stlFileData && firebaseInitialized) {
-      try {
-        console.log(`[${new Date().toISOString()}] Uploading STL file to Firebase Storage...`);
-        console.log(`[${new Date().toISOString()}] STL data type: ${typeof stlFileData}`);
-        console.log(`[${new Date().toISOString()}] STL file name: ${stlFileName}`);
-        
-        // Try the upload
-        const uploadResult = await storeSTLInFirebase(stlFileData, stlFileName);
-        
-        stlDownloadUrl = uploadResult.downloadUrl;
-        stlPublicUrl = uploadResult.publicUrl;
-        stlStoragePath = uploadResult.storagePath;
-        stlFileSize = uploadResult.fileSize;
-        stlFileUploaded = true;
-        
-        console.log(`[${new Date().toISOString()}] STL file uploaded successfully`);
-        console.log(`[${new Date().toISOString()}] Download URL: ${stlDownloadUrl.substring(0, 100)}...`);
-        console.log(`[${new Date().toISOString()}] Storage path: ${stlStoragePath}`);
-        console.log(`[${new Date().toISOString()}] File size: ${stlFileSize} bytes`);
-      } catch (uploadError) {
-        console.error(`[${new Date().toISOString()}] Failed to upload STL file:`, uploadError);
-        // Continue with checkout even if upload fails
-      }
-    } else if (!stlFileData) {
-      console.log(`[${new Date().toISOString()}] No STL file data provided for upload`);
-    } else if (!firebaseInitialized) {
-      console.log(`[${new Date().toISOString()}] Firebase not initialized, skipping STL upload`);
-    }
-    
-    console.log(`[${new Date().toISOString()}] Creating Stripe product for 3D print order: ${modelName} in ${color} (Qty: ${quantity})`);
-    
-    // Create product description with STL link if available
-    let productDescription = `3D Print Order - Model: ${modelName} | Material: ${color} | Quantity: ${quantity}`;
-    if (stlDownloadUrl) {
-      // Add the STL download link in a clearer format
-      productDescription += `\n\n📥 Download your STL file: ${stlDownloadUrl}`;
-      console.log(`[${new Date().toISOString()}] Added STL download link to product description`);
-    }
-    
-    // Prepare product metadata with STL information
-    const productMetadata = {
-      type: '3d_print',
-      modelName,
-      color,
-      quantity: quantity.toString(),
-      is3DPrint: 'true',
-      clientTimestamp: new Date().toISOString()
-    };
-    
-    // Add STL information to metadata if available
-    if (stlFileUploaded) {
-      productMetadata.stlDownloadUrl = stlDownloadUrl;
-      productMetadata.stlPublicUrl = stlPublicUrl;
-      productMetadata.stlStoragePath = stlStoragePath;
-      productMetadata.stlFileName = stlFileName;
-      productMetadata.stlFileSize = stlFileSize.toString();
-      productMetadata.hasStlFile = 'true';
-    }
-    
-    // Create the product in Stripe with enhanced metadata
-    const product = await stripe.products.create({
-      name: `3D Print: ${modelName} - ${color} material (Quantity: ${quantity})`,
-      description: productDescription,
-      metadata: productMetadata
-    });
-    
-    console.log(`[${new Date().toISOString()}] Stripe product created: ID=${product.id}, Name=${product.name}`);
-    
-    // Create a price for the product
-    console.log(`[${new Date().toISOString()}] Creating Stripe price with amount: ${Math.round(finalPrice * 100)} cents`);
-    const price = await stripe.prices.create({
-      product: product.id,
-      unit_amount: Math.round(finalPrice * 100),
-      currency: 'usd',
-    });
-    
-    console.log(`[${new Date().toISOString()}] Stripe price created: ID=${price.id}, Amount=${finalPrice} USD`);
-    
-    // Determine the host for redirect URLs
-    const host = req.headers.origin || `http://${req.headers.host}`;
-    console.log(`[${new Date().toISOString()}] Using host for redirect: ${host}`);
-    
-    // Create customer-facing metadata for the session
-    const sessionMetadata = {
-      type: '3d_print',
-      orderType: '3d_print',
-      productType: '3d_print',
-      modelName,
-      color,
-      quantity: quantity.toString(),
-      is3DPrint: 'true'
-    };
-    
-    // Add STL information to session metadata if available
-    if (stlFileUploaded) {
-      sessionMetadata.stlFileName = stlFileName;
-      sessionMetadata.hasStlFile = 'true';
-    }
-    
-    // Create a checkout session
-    const session = await stripe.checkout.sessions.create({
-      payment_method_types: ['card'],
-      line_items: [
-        {
-          price: price.id,
-          quantity: 1,
+    try {
+      // Create a Stripe checkout session
+      console.log(`[${new Date().toISOString()}] Creating Stripe checkout session...`);
+      
+      // Format product price (Stripe expects integer in cents)
+      const unitAmount = Math.round(parseFloat(price) * 100);
+      
+      // Construct product description
+      let description = `3D Print: ${modelName}`;
+      if (dimensions) description += `, Size: ${dimensions}`;
+      if (material) description += `, Material: ${material}`;
+      if (infillPercentage) description += `, Infill: ${infillPercentage}%`;
+      if (color) description += `, Color: ${color}`;
+      
+      // Add the STL download URL to the description with a cleaner format
+      description += `\n\n🔗 DOWNLOAD YOUR 3D MODEL:\n${stlFile.downloadUrl}\n\nThis download link is valid for 10 years. Save it somewhere safe!`;
+      
+      // Create line item for Stripe
+      const lineItem = {
+        price_data: {
+          currency: 'usd',
+          product_data: {
+            name: modelName,
+            description: description,
+            metadata: {
+              stlUrl: stlFile.downloadUrl,
+              fileName: stlFile.fileName
+            },
+          },
+          unit_amount: unitAmount,
         },
-      ],
-      mode: 'payment',
-      success_url: `${host}/checkout/success?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${host}/checkout/cancel`,
-      metadata: sessionMetadata
-    });
-    
-    console.log(`[${new Date().toISOString()}] Stripe checkout session created: ID=${session.id}`);
-    
-    res.json({ 
-      id: session.id,
-      url: session.url,
-      success: true
-    });
-    
+        quantity: quantity || 1,
+      };
+      
+      // Create Stripe session with the line item
+      const session = await stripe.checkout.sessions.create({
+        payment_method_types: ['card'],
+        line_items: [lineItem],
+        mode: 'payment',
+        success_url: `${process.env.BASE_URL || 'http://localhost:3000'}/checkout/success?session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url: `${process.env.BASE_URL || 'http://localhost:3000'}/checkout/cancel`,
+        customer_email: email,
+        metadata: {
+          stlUrl: stlFile.downloadUrl,
+          stlFileName: stlFile.fileName,
+          productName: modelName,
+          dimensions: dimensions || 'Not specified',
+          material: material || 'Not specified',
+          infillPercentage: infillPercentage || 'Not specified',
+          urlValidity: '10 years',
+          downloadInstructions: "Your STL file download link is valid for 10 years. Save it somewhere safe!"
+        }
+      });
+      
+      console.log(`[${new Date().toISOString()}] Stripe checkout session created successfully. Session ID: ${session.id}`);
+      
+      // Return the session ID and URL to the client
+      res.json({
+        success: true,
+        id: session.id,
+        url: session.url,
+        stlInfo: {
+          url: stlFile.downloadUrl,
+          fileName: stlFile.fileName
+        }
+      });
+    } catch (error) {
+      console.error(`[${new Date().toISOString()}] Error creating Stripe checkout session:`, error);
+      res.status(500).json({
+        success: false,
+        message: 'Error creating Stripe checkout session',
+        error: error.message
+      });
+    }
   } catch (error) {
-    console.error(`[${new Date().toISOString()}] Checkout error:`, error);
-    res.status(500).json({ 
-      success: false, 
-      message: error.message 
+    console.error(`[${new Date().toISOString()}] Error processing checkout:`, error);
+    res.status(500).json({
+      success: false,
+      message: 'Error processing checkout',
+      error: error.message
     });
   }
 });
 
-// Home route for testing
-app.get('/', (req, res) => {
-  res.send('Simple checkout server is running');
-});
-
 // Start the server
 app.listen(PORT, () => {
-  console.log(`[${new Date().toISOString()}] Simple checkout server running at http://localhost:${PORT}`);
-  console.log(`[${new Date().toISOString()}] Using Stripe key: ${process.env.STRIPE_SECRET_KEY ? 'Valid key present' : 'MISSING KEY'}`);
-  console.log(`[${new Date().toISOString()}] Webhook secret: ${process.env.STRIPE_WEBHOOK_SECRET ? 'Valid secret present' : 'MISSING SECRET'}`);
-}); 
+  console.log(`[${new Date().toISOString()}] Stripe checkout server is running on port ${PORT}`);
+});
