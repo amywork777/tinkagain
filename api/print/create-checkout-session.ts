@@ -17,11 +17,15 @@ try {
       ? process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n') 
       : undefined;
     
+    if (!process.env.FIREBASE_PROJECT_ID || !privateKey || !process.env.FIREBASE_CLIENT_EMAIL) {
+      throw new Error('Missing required Firebase environment variables');
+    }
+    
     admin.initializeApp({
       credential: admin.credential.cert({
-        projectId: process.env.FIREBASE_PROJECT_ID || '',
+        projectId: process.env.FIREBASE_PROJECT_ID,
         privateKey: privateKey,
-        clientEmail: process.env.FIREBASE_CLIENT_EMAIL || '',
+        clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
       }),
       storageBucket: 'taiyaki-test1.firebasestorage.app'
     });
@@ -31,9 +35,14 @@ try {
   
   // Get the Firebase Storage bucket
   firebaseStorage = admin.storage().bucket();
+  if (!firebaseStorage) {
+    throw new Error('Failed to initialize Firebase Storage bucket');
+  }
   console.log('Firebase Storage initialized:', firebaseStorage.name);
 } catch (error) {
   console.error('Error initializing Firebase:', error);
+  // Don't continue with the rest of the code if Firebase initialization fails
+  throw error;
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
