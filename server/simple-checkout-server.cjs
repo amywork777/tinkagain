@@ -4011,3 +4011,15 @@ app.post('/api/3d-print/checkout', (req, res) => {
 });
 
 // ... existing code ...
+
+// Update the confirmation page to display a thank you message
+app.get('/checkout-confirmation', (req, res) => {
+  res.send(`
+    <div style="text-align: center; font-family: Arial, sans-serif;">
+      <img src="/path/to/taiyaki-logo.png" alt="Taiyaki Logo" style="width: 100px; margin-bottom: 20px;" />
+      <h1>Thank you for your order!</h1>
+      <p>Your order has been successfully processed. We appreciate your business.</p>
+      <a href="/" style="display: inline-block; margin-top: 20px; padding: 10px 20px; background-color: #0366d6; color: white; text-decoration: none; border-radius: 4px;">Return to Home</a>
+    </div>
+  `);
+});
