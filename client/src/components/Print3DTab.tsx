@@ -867,20 +867,18 @@ const Print3DTab = () => {
       // Define possible endpoint patterns to try
       const domainBase = window.location.origin;
       const possibleEndpoints = [
-        // Debug endpoint - try first to verify connectivity
-        `${domainBase}/api/debug-checkout`,
+        // Primary endpoint for 3D print checkout
+        `${domainBase}/api/print/create-checkout-session`,
+        `${apiUrl}/print/create-checkout-session`,
 
-        // Primary endpoints - simplified to try the most likely ones first
+        // Fallback endpoints
         `${domainBase}/api/checkout`,
         `${apiUrl}/checkout`,
-
-        // Alternative endpoints
         `${domainBase}/api/create-checkout-session`,
         `${apiUrl}/create-checkout-session`,
 
-        // Fallback endpoints
-        `${domainBase}/api/print/create-checkout-session`,
-        `${apiUrl}/print/create-checkout-session`,
+        // Debug endpoint as last resort
+        `${domainBase}/api/debug-checkout`
       ];
 
       // Function to try each endpoint in sequence
@@ -899,7 +897,7 @@ const Print3DTab = () => {
         }
 
         // Focus on the primary checkout endpoint first with a more specific format
-        const endpoint = `${domainBase}/api/checkout`;
+        const endpoint = possibleEndpoints[index];
         console.log(`[${new Date().toISOString()}] CHECKOUT REQUEST: Sending to ${endpoint}`);
         console.log(`[${new Date().toISOString()}] CHECKOUT STL DATA: ${stlFileData ? 'Present (length: ' + stlFileData.length + ')' : 'Missing'}`);
 
