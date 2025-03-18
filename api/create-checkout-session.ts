@@ -412,6 +412,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           {
             price: price.id,
             quantity: 1,
+            description: stlDownloadUrl ? 
+              `Your STL file will be available at: ${stlDownloadUrl}\n\nThis URL is valid for 10 years - please save it.` : 
+              undefined
           },
         ],
         mode: 'payment',
@@ -426,7 +429,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         },
         custom_text: stlDownloadUrl ? {
           submit: {
-            message: `IMPORTANT: Your STL file URL is shown in the product description above. Please save it.`
+            message: `IMPORTANT: Your STL file URL is shown in the item description above. Please save it before completing your purchase.`
           }
         } : undefined,
       });
