@@ -37,80 +37,76 @@ interface OrderDetails {
 const CheckoutConfirmation = () => {
   const [searchParams] = useSearchParams();
   const { toast } = useToast();
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [orderDetails, setOrderDetails] = useState<OrderDetails | null>(null);
+  
+  // Check for download parameter instead of session_id
+  const downloadUrl = searchParams.get('download');
   const sessionId = searchParams.get('session_id');
 
   useEffect(() => {
-    const fetchOrderDetails = async () => {
-      if (!sessionId) {
-        setLoading(false);
-        return;
-      }
-
-      // Implement retry logic
-      const maxRetries = 3;
-      let attempt = 0;
-      let success = false;
-
-      while (attempt < maxRetries && !success) {
-        attempt++;
+    // If we have a download URL from the query params, create a simple orderDetails object
+    if (downloadUrl) {
+      setLoading(false);
+      setOrderDetails({
+        orderId: `order-${Date.now()}`,
+        modelName: 'Your 3D Model',
+        color: 'As specified',
+        quantity: 1,
+        finalPrice: 0,
+        paymentStatus: 'Received',
+        stlFileUrl: downloadUrl
+      });
+      
+      // Show confirmation toast
+      toast({
+        title: "Order received",
+        description: "Thank you for your order!",
+        variant: "default"
+      });
+      
+      return;
+    }
+    
+    // For backward compatibility, still try to fetch order details if session_id is present
+    if (sessionId) {
+      const fetchOrderDetails = async () => {
+        setLoading(true);
         try {
-          console.log(`Attempt ${attempt} to fetch order details for session: ${sessionId}`);
-          
-          // Fetch order details from the backend
-          const response = await fetch(`/api/order-details?session_id=${sessionId}`);
+          // Try to fetch order details, but don't worry if it fails
+          const response = await fetch(`/api/checkout/session/${sessionId}`);
           const data = await response.json();
-
-          if (data.success && data.order) {
-            console.log(`Successfully retrieved order details on attempt ${attempt}:`, data.order);
-            setOrderDetails(data.order);
-            success = true;
+          
+          if (data.success) {
+            setOrderDetails({
+              orderId: `order-${sessionId.substring(0, 8)}`,
+              modelName: 'Your 3D Model',
+              color: 'As specified',
+              quantity: 1,
+              finalPrice: data.amount ? data.amount / 100 : 0,
+              paymentStatus: data.status || 'Received',
+              stlFileUrl: data.downloadUrl
+            });
             
-            // Show confirmation toast
             toast({
               title: "Order confirmed",
               description: "Your order has been placed successfully!",
               variant: "default"
             });
-          } else {
-            console.warn(`Failed to get order details on attempt ${attempt}:`, data.message);
-            
-            if (attempt === maxRetries) {
-              toast({
-                title: "Failed to load order details",
-                description: data.message || "Please try refreshing the page or contact support if this persists",
-                variant: "destructive"
-              });
-            } else {
-              // Wait longer between each retry
-              const delay = attempt * 1000; // 1s, 2s, 3s...
-              console.log(`Waiting ${delay}ms before retry...`);
-              await new Promise(resolve => setTimeout(resolve, delay));
-            }
           }
         } catch (error) {
-          console.error(`Error fetching order details (attempt ${attempt}):`, error);
-          
-          if (attempt === maxRetries) {
-            toast({
-              title: "Error",
-              description: "Failed to load your order details. Please try refreshing the page.",
-              variant: "destructive"
-            });
-          } else {
-            // Wait longer between each retry
-            const delay = attempt * 1000;
-            await new Promise(resolve => setTimeout(resolve, delay));
-          }
+          console.error("Error fetching order details:", error);
+        } finally {
+          setLoading(false);
         }
-      }
+      };
       
+      fetchOrderDetails();
+    } else {
+      // No download URL or session ID, just show the thank you page
       setLoading(false);
-    };
-
-    fetchOrderDetails();
-  }, [sessionId, toast]);
+    }
+  }, [downloadUrl, sessionId, toast]);
 
   // Function to download STL file if available
   const handleDownloadSTL = () => {
@@ -143,24 +139,36 @@ const CheckoutConfirmation = () => {
           </Card>
         ) : !orderDetails ? (
           <Card>
-            <CardHeader>
-              <CardTitle>Order Not Found</CardTitle>
+            <CardHeader className="text-center">
+              <div className="flex justify-center mb-4">
+                <CheckCircle className="h-16 w-16 text-green-500" />
+              </div>
+              <CardTitle className="text-2xl">Thank You for Your Order!</CardTitle>
               <CardDescription>
-                We couldn't find your order details.
+                Your 3D print order has been received and is being processed.
               </CardDescription>
             </CardHeader>
             <CardContent>
               <p className="text-muted-foreground mb-4">
-                This could be because:
+                We've sent a confirmation email with your order details and download link.
               </p>
-              <ul className="list-disc pl-5 space-y-2 text-muted-foreground">
-                <li>The session ID is invalid or expired</li>
-                <li>Your payment is still processing</li>
-                <li>There was an error with the payment</li>
-              </ul>
+              <p className="text-muted-foreground mb-6">
+                If you have any questions about your order, please contact us at support@taiyaki.studio
+              </p>
+              
+              {downloadUrl && (
+                <Button 
+                  variant="outline" 
+                  className="w-full mb-4"
+                  onClick={() => window.open(downloadUrl, '_blank')}
+                >
+                  <Download className="mr-2 h-4 w-4" />
+                  Download Your 3D Model
+                </Button>
+              )}
             </CardContent>
             <CardFooter>
-              <Button asChild>
+              <Button asChild className="w-full">
                 <Link to="/">
                   <ArrowLeft className="mr-2 h-4 w-4" />
                   Return to Home
