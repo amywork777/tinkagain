@@ -13,10 +13,18 @@ import * as THREE from 'three';
 import axios from 'axios';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Loader2, Upload } from 'lucide-react';
+import { Loader2, Upload, Download, ExternalLink, ChevronRight } from 'lucide-react';
 import { Slider } from '@/components/ui/slider';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { useToast } from '@/hooks/use-toast';
+import { 
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 // Define the allowed origins - ensure this matches what's in the server
 const ALLOWED_ORIGINS = ["https://fishcad.com", "https://www.fishcad.com", "http://localhost:3000", "http://localhost:3001", "http://localhost:5173"];
@@ -144,6 +152,16 @@ export function STLImporter() {
   const [material, setMaterial] = useState('PLA');
   const [infill, setInfill] = useState(20);
   const [email, setEmail] = useState('');
+  
+  // Add these new states for the download dialog
+  const [isDownloadDialogOpen, setIsDownloadDialogOpen] = useState(false);
+  const [downloadInfo, setDownloadInfo] = useState<{
+    url: string;
+    fileName: string;
+    checkoutUrl: string;
+    modelId: string;
+  } | null>(null);
+  const [hasCopiedLink, setHasCopiedLink] = useState(false);
   
   const { toast } = useToast();
   
@@ -812,6 +830,164 @@ export function STLImporter() {
         return <XCircle className="h-4 w-4 text-red-500" />;
       default:
         return <AlertCircle className="h-4 w-4 text-gray-500" />;
+    }
+  };
+  
+  const handleCheckout = async () => {
+    if (!file || !base64Data) {
+      setError('Please upload an STL file first');
+      return;
+    }
+    
+    setProcessingCheckout(true);
+    setError(null);
+    
+    try {
+      // Prepare checkout data
+      const checkoutData = {
+        stlBase64: base64Data,
+        stlFileName: file.name,
+        modelName: modelName || file.name.replace(/\.stl$/i, ''),
+        dimensions: `${modelWidth}x${modelHeight}x${modelDepth}`,
+        material,
+        infillPercentage: infill,
+        price: calculatePrice(), // in cents
+        email,
+      };
+      
+      // Send checkout request
+      const response = await axios.post('/api/checkout', checkoutData, {
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        timeout: 60000, // 60 second timeout for large files
+      });
+      
+      // Check for successful response
+      if (response.data && response.data.success) {
+        // Extract the STL URL and other info
+        if (response.data.stlInfo && response.data.stlInfo.url) {
+          setDownloadInfo({
+            url: response.data.stlInfo.url,
+            fileName: response.data.stlInfo.fileName || file.name,
+            checkoutUrl: response.data.url,
+            modelId: response.data.stlInfo.modelId || ''
+          });
+          
+          // Show the download dialog
+          setIsDownloadDialogOpen(true);
+          
+          // Don't redirect automatically, let the user choose
+        } else if (response.data.url) {
+          // No download link, just redirect to Stripe
+          window.location.href = response.data.url;
+        } else {
+          setError('Checkout succeeded but no redirect URL was provided');
+          toast({
+            title: 'Checkout Error',
+            description: 'Unable to proceed to payment page. Please try again.',
+            variant: 'destructive',
+          });
+        }
+      } else {
+        // Handle server-side error
+        setError(response.data.error || 'Checkout failed. Please try again.');
+        toast({
+          title: 'Checkout Failed',
+          description: response.data.error || 'Unable to process checkout. Please try again.',
+          variant: 'destructive',
+        });
+      }
+    } catch (error: any) {
+      console.error('Checkout error:', error);
+      
+      // Extract error message from axios error
+      let errorMessage = 'Network error. Please check your connection and try again.';
+      
+      if (error.response) {
+        // Server responded with error status
+        errorMessage = error.response.data?.error || 
+                      `Server error: ${error.response.status} ${error.response.statusText}`;
+      } else if (error.request) {
+        // Request was made but no response received
+        errorMessage = 'Server did not respond. Please try again later.';
+      } else if (error.message) {
+        // Other errors
+        errorMessage = error.message;
+      }
+      
+      setError(errorMessage);
+      toast({
+        title: 'Checkout Error',
+        description: errorMessage,
+        variant: 'destructive',
+      });
+    } finally {
+      setProcessingCheckout(false);
+    }
+  };
+  
+  // Add function to handle download
+  const handleDownload = () => {
+    if (downloadInfo?.url) {
+      // Create a hidden anchor element for download
+      const a = document.createElement('a');
+      a.style.display = 'none';
+      a.href = downloadInfo.url;
+      a.download = downloadInfo.fileName;
+      
+      // Add to DOM, click, and remove
+      document.body.appendChild(a);
+      a.click();
+      
+      setTimeout(() => {
+        document.body.removeChild(a);
+      }, 100);
+      
+      toast({
+        title: 'Download Started',
+        description: `Your STL file "${downloadInfo.fileName}" is downloading.`,
+      });
+    }
+  };
+  
+  // Add function to copy link to clipboard
+  const copyLinkToClipboard = () => {
+    if (downloadInfo?.url) {
+      navigator.clipboard.writeText(downloadInfo.url)
+        .then(() => {
+          setHasCopiedLink(true);
+          toast({
+            title: 'Link Copied',
+            description: 'Download link copied to clipboard',
+          });
+          
+          // Reset the copied state after 3 seconds
+          setTimeout(() => {
+            setHasCopiedLink(false);
+          }, 3000);
+        })
+        .catch((error) => {
+          console.error('Failed to copy link:', error);
+          toast({
+            title: 'Failed to Copy',
+            description: 'Could not copy link to clipboard',
+            variant: 'destructive',
+          });
+        });
+    }
+  };
+  
+  // Function to proceed to Stripe checkout
+  const proceedToStripeCheckout = () => {
+    if (downloadInfo?.checkoutUrl) {
+      window.location.href = downloadInfo.checkoutUrl;
+    } else {
+      toast({
+        title: 'Error',
+        description: 'Checkout URL is missing',
+        variant: 'destructive',
+      });
     }
   };
   
