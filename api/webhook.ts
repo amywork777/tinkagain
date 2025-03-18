@@ -1,80 +1,57 @@
 import { VercelRequest, VercelResponse } from '@vercel/node';
 import { Stripe } from 'stripe';
-import * as admin from 'firebase-admin';
 import { buffer } from 'micro';
+import { createClient } from '@supabase/supabase-js';
 
-// PRODUCTION HOTFIX: Direct Firebase initialization for Vercel deployment
-// This ensures the API works even if utils/firebase-admin.ts is missing
-let firebaseInitialized = false;
+// Initialize Supabase client
+let supabaseClient: any = null;
+let supabaseInitialized = false;
 
-// Initialize Firebase Admin if needed
-function initializeFirebaseDirectly() {
-  if (!firebaseInitialized && !admin.apps.length) {
+// Initialize Supabase if needed
+function initializeSupabase() {
+  if (!supabaseInitialized) {
     try {
-      // Try to load service account from environment variable
-      const privateKey = process.env.FIREBASE_PRIVATE_KEY 
-        ? process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n') 
-        : undefined;
+      const supabaseUrl = process.env.SUPABASE_URL;
+      const supabaseKey = process.env.SUPABASE_SERVICE_KEY;
       
-      // Add validation for required environment variables
-      if (!privateKey) {
-        console.error('Firebase private key is missing or invalid');
+      if (!supabaseUrl) {
+        console.error('Supabase URL is missing');
       }
       
-      if (!process.env.FIREBASE_PROJECT_ID) {
-        console.error('Firebase project ID is missing');
+      if (!supabaseKey) {
+        console.error('Supabase service key is missing');
       }
       
-      if (!process.env.FIREBASE_CLIENT_EMAIL) {
-        console.error('Firebase client email is missing');
+      if (supabaseUrl && supabaseKey) {
+        supabaseClient = createClient(supabaseUrl, supabaseKey);
+        supabaseInitialized = true;
+        console.log('Supabase client initialized in webhook handler');
+      } else {
+        console.error('Cannot initialize Supabase: missing configuration');
       }
-      
-      const credential = admin.credential.cert({
-        projectId: process.env.FIREBASE_PROJECT_ID || '',
-        privateKey: privateKey || '',
-        clientEmail: process.env.FIREBASE_CLIENT_EMAIL || '',
-      });
-      
-      admin.initializeApp({
-        credential: credential,
-        storageBucket: process.env.FIREBASE_STORAGE_BUCKET || 'taiyaki-test1.firebasestorage.app'
-      });
-      
-      firebaseInitialized = true;
-      console.log('Firebase Admin SDK initialized directly in webhook handler');
     } catch (error) {
-      console.error('Error initializing Firebase directly:', error);
-      throw error;
+      console.error('Error initializing Supabase:', error);
     }
-  } else if (firebaseInitialized) {
-    console.log('Using existing Firebase Admin SDK instance');
-  } else if (admin.apps.length) {
-    firebaseInitialized = true;
-    console.log('Using existing Firebase Admin app');
+  } else {
+    console.log('Using existing Supabase client instance');
   }
   
-  return admin;
-}
-
-// Get the Firestore instance, initializing Firebase if necessary
-function getFirestoreDirectly() {
-  const adminInstance = initializeFirebaseDirectly();
-  return adminInstance.firestore();
+  return supabaseClient;
 }
 
 // Define interfaces for type safety
 interface UserData {
   uid?: string;
   email?: string;
-  isPro?: boolean;
-  stripeCustomerId?: string;
-  stripeSubscriptionId?: string;
-  subscriptionStatus?: string;
-  subscriptionEndDate?: string;
-  subscriptionPlan?: string;
-  modelsRemainingThisMonth?: number;
-  createdAt?: any; // using any for flexibility with server timestamps
-  updatedAt?: any;
+  is_pro?: boolean;
+  stripe_customer_id?: string;
+  stripe_subscription_id?: string;
+  subscription_status?: string;
+  subscription_end_date?: string;
+  subscription_plan?: string;
+  models_remaining_this_month?: number;
+  created_at?: string;
+  updated_at?: string;
   [key: string]: any; // Allow additional properties
 }
 
@@ -90,6 +67,16 @@ const stripeSecretKey = process.env.STRIPE_SECRET_KEY || '';
 const stripe = new Stripe(stripeSecretKey, {
   apiVersion: '2023-10-16' as any,
 });
+
+// Debugging guard to catch undefined references
+function safeObjectCheck(obj: any, property: string): boolean {
+  try {
+    return obj && typeof obj === 'object' && property in obj;
+  } catch (error) {
+    console.error(`Error checking property ${property}:`, error);
+    return false;
+  }
+}
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   // Debug: Log the request information
@@ -148,10 +135,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(400).json({ success: false, message: `Webhook Error: ${err.message}` });
   }
 
-  // Get Firebase Admin and Firestore instances directly
   try {
-    const adminSdk = initializeFirebaseDirectly();
-    const db = getFirestoreDirectly();
+    // Initialize Supabase
+    const supabase = initializeSupabase();
+    
+    // Added defensive logging
+    if (!supabase) {
+      console.log('WARNING: Supabase client not initialized, continuing with limited functionality');
+    }
     
     console.log(`Processing webhook event: ${event.type}, id: ${event.id}`);
 
@@ -161,7 +152,46 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const session = event.data.object as Stripe.Checkout.Session;
         console.log(`Processing completed checkout session: ${session.id}`);
         
-        // Only handle subscription checkouts
+        // Safely check if this is a 3D print order with defensive code
+        let is3DPrintOrder = false;
+        
+        // Add null checks before accessing properties
+        if (session && session.metadata) {
+          is3DPrintOrder = 
+            session.metadata.orderType === '3d_print' ||
+            session.metadata.type === '3d_print' ||
+            session.metadata.is3DPrint === 'true';
+        }
+        
+        console.log('Order metadata:', session.metadata);
+        console.log('Is 3D print order:', is3DPrintOrder);
+        
+        if (is3DPrintOrder) {
+          console.log('Processing 3D print order');
+          
+          // Update model status in Supabase if we have a modelId
+          if (session.metadata && session.metadata.modelId && supabase) {
+            const modelId = session.metadata.modelId;
+            console.log(`Updating model ${modelId} status to paid`);
+            
+            const { data, error } = await supabase
+              .from('models')
+              .update({ status: 'paid', payment_completed_at: new Date().toISOString() })
+              .eq('id', modelId);
+              
+            if (error) {
+              console.error('Error updating model status:', error);
+            } else {
+              console.log('Model status updated successfully');
+            }
+          }
+          
+          // Handle 3D print checkout completed - no subscription handling needed
+          console.log('3D print order payment completed');
+          break;
+        }
+        
+        // Only continue with subscription handling if this is a subscription checkout
         if (session.mode !== 'subscription') {
           console.log('Not a subscription checkout, skipping');
           break;
@@ -203,6 +233,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           break;
         }
         
+        if (!supabase) {
+          console.error('Supabase client not initialized, cannot update user subscription');
+          break;
+        }
+        
         console.log(`Updating subscription status for user: ${userId}`);
         
         // Get subscription plan info - add null checks
@@ -223,175 +258,211 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000); // Default to 30 days from now
         
         // Log the update we're about to make
-        console.log(`Setting user ${userId} to isPro=true, with subscription ID ${subscription.id}, status ${subscription.status}`);
+        console.log(`Setting user ${userId} to is_pro=true, with subscription ID ${subscription.id}, status ${subscription.status}`);
         
-        // Update user subscription status in Firestore
-        const userDocRef = db.collection('users').doc(userId);
+        // Update user subscription status in Supabase
         const updateData: UserData = {
-          isPro: true,
-          stripeCustomerId: customerId,
-          stripeSubscriptionId: subscription.id,
-          subscriptionStatus: subscription.status,
-          subscriptionEndDate: endDate.toISOString(),
-          subscriptionPlan: priceId,
-          modelsRemainingThisMonth: 999999, // Effectively unlimited
-          updatedAt: adminSdk.firestore.FieldValue.serverTimestamp()
+          is_pro: true,
+          stripe_customer_id: customerId,
+          stripe_subscription_id: subscription.id,
+          subscription_status: subscription.status,
+          subscription_end_date: endDate.toISOString(),
+          subscription_plan: priceId,
+          models_remaining_this_month: 999999, // Effectively unlimited
+          updated_at: new Date().toISOString()
         };
         
-        console.log(`Updating Firestore document for user ${userId} with:`, JSON.stringify(updateData));
+        console.log(`Updating Supabase record for user ${userId} with:`, JSON.stringify(updateData));
         
         // Check if the user exists first
-        try {
-          const userDoc = await userDocRef.get();
-          if (!userDoc.exists) {
-            console.log(`User ${userId} doesn't exist in Firestore, creating new document`);
-            
-            // Get customer email - add null checks
-            let customerEmail = '';
-            if (typeof session.customer === 'string') {
-              try {
-                const customerData = await stripe.customers.retrieve(session.customer) as Stripe.Customer;
-                customerEmail = customerData.email || '';
-              } catch (error) {
-                console.error('Error retrieving customer email:', error);
-              }
-            } else if (session.customer) {
-              customerEmail = (session.customer as Stripe.Customer)?.email || '';
-            }
-            
-            await userDocRef.set({
-              ...updateData,
-              createdAt: adminSdk.firestore.FieldValue.serverTimestamp(),
-              email: customerEmail
-            });
-          } else {
-            console.log(`User ${userId} exists in Firestore, updating document`);
-            await userDocRef.update(updateData);
-            
-            // Double-check that the update was applied
-            const updatedDoc = await userDocRef.get();
-            const updatedData = updatedDoc.data();
-            if (updatedData && (!updatedData.isPro || updatedData.subscriptionStatus !== subscription.status)) {
-              console.error(`Update may not have been applied correctly. Current data:`, updatedData);
-              // Try to update again with a different approach
-              await userDocRef.set(updateData, { merge: true });
+        const { data: existingUser, error: userFetchError } = await supabase
+          .from('users')
+          .select('*')
+          .eq('id', userId)
+          .single();
+          
+        if (userFetchError) {
+          console.error(`Error fetching user ${userId}:`, userFetchError);
+          
+          // Try to create the user
+          console.log(`User ${userId} not found or error, creating new record`);
+          
+          // Get customer email - add null checks
+          let customerEmail = '';
+          if (session.customer_email) {
+            customerEmail = session.customer_email;
+          } else if (session.customer_details?.email) {
+            customerEmail = session.customer_details.email;
+          } else if (session.customer) {
+            try {
+              const customerId = typeof session.customer === 'string' 
+                ? session.customer 
+                : session.customer.id;
+                
+              const customer = await stripe.customers.retrieve(customerId) as Stripe.Customer;
+              customerEmail = customer.email || '';
+            } catch (e) {
+              console.error('Error retrieving customer details:', e);
             }
           }
           
-          console.log(`✅ Successfully updated subscription status for user ${userId}`);
-        } catch (firestoreError) {
-          console.error(`⚠️ Error updating Firestore for user ${userId}:`, firestoreError);
-        }
-        break;
-      }
-      
-      case 'customer.subscription.updated': {
-        const subscription = event.data.object as Stripe.Subscription;
-        console.log(`Processing subscription update: ${subscription.id}, status: ${subscription.status}`);
-        
-        // Get user ID from subscription metadata
-        let userId = subscription.metadata?.userId;
-        
-        // If no user ID in subscription metadata, try to get it from customer metadata
-        if (!userId && subscription.customer) {
-          const customerId = typeof subscription.customer === 'string' 
-            ? subscription.customer 
-            : subscription.customer.id;
-            
-          try {
-            const customer = await stripe.customers.retrieve(customerId) as Stripe.Customer;
-            userId = customer.metadata?.userId;
-          } catch (error) {
-            console.error('Error retrieving customer:', error);
-          }
-        }
-        
-        if (!userId) {
-          console.error('No user ID found in subscription or customer metadata');
-          break;
-        }
-        
-        const userRef = db.collection('users').doc(userId);
-        
-        try {
-          // Get current user data
-          const userDoc = await userRef.get();
-          if (!userDoc.exists) {
-            console.error(`User ${userId} not found in Firestore`);
-            break;
-          }
-          
-          const userData = userDoc.data() || {};
-          
-          // Update status based on subscription status
-          const isPro = subscription.status === 'active' || 
-                        subscription.status === 'trialing';
-                        
-          // Calculate end date
-          const endDate = subscription.current_period_end
-            ? new Date(subscription.current_period_end * 1000)
-            : null;
-            
-          const updateData: any = {
-            updatedAt: adminSdk.firestore.FieldValue.serverTimestamp(),
-            subscriptionStatus: subscription.status,
-            isPro: isPro,
+          // Create new user with subscription data
+          const newUserData: UserData = {
+            ...updateData,
+            id: userId,
+            email: customerEmail,
+            created_at: new Date().toISOString()
           };
           
-          if (endDate) {
-            updateData.subscriptionEndDate = endDate.toISOString();
+          const { data: insertResult, error: insertError } = await supabase
+            .from('users')
+            .insert([newUserData]);
+            
+          if (insertError) {
+            console.error(`Error creating user ${userId}:`, insertError);
+          } else {
+            console.log(`Created new user ${userId} with subscription data`);
           }
-          
-          // Update Firestore
-          await userRef.update(updateData);
-          console.log(`Updated subscription status for user ${userId} to ${subscription.status}, isPro=${isPro}`);
-          
-        } catch (firestoreError) {
-          console.error('Error updating user subscription status:', firestoreError);
+        } else {
+          // Update existing user
+          const { data: updateResult, error: updateError } = await supabase
+            .from('users')
+            .update(updateData)
+            .eq('id', userId);
+            
+          if (updateError) {
+            console.error(`Error updating user ${userId}:`, updateError);
+          } else {
+            console.log(`Updated user ${userId} with subscription data`);
+          }
         }
+        
         break;
       }
       
-      case 'customer.subscription.deleted': {
-        const subscription = event.data.object as Stripe.Subscription;
-        console.log(`Processing subscription deletion: ${subscription.id}`);
+      case 'invoice.payment_succeeded': {
+        const invoice = event.data.object as Stripe.Invoice;
+        console.log(`Processing invoice payment succeeded: ${invoice.id}`);
         
-        // Get user ID from subscription metadata
-        let userId = subscription.metadata?.userId;
-        
-        // If no user ID in subscription metadata, try to get it from customer metadata
-        if (!userId && subscription.customer) {
-          const customerId = typeof subscription.customer === 'string' 
-            ? subscription.customer 
-            : subscription.customer.id;
-            
-          try {
-            const customer = await stripe.customers.retrieve(customerId) as Stripe.Customer;
-            userId = customer.metadata?.userId;
-          } catch (error) {
-            console.error('Error retrieving customer:', error);
-          }
-        }
-        
-        if (!userId) {
-          console.error('No user ID found in subscription or customer metadata');
+        // Only process subscription invoices
+        if (!invoice.subscription) {
+          console.log('Not a subscription invoice, skipping');
           break;
         }
         
-        const userRef = db.collection('users').doc(userId);
+        const customerId = invoice.customer as string;
+        console.log(`Invoice for customer: ${customerId}`);
         
-        try {
-          // Update subscription status
-          await userRef.update({
-            isPro: false,
-            subscriptionStatus: 'canceled',
-            updatedAt: adminSdk.firestore.FieldValue.serverTimestamp()
-          });
-          
-          console.log(`Updated subscription status for user ${userId} to canceled, isPro=false`);
-        } catch (firestoreError) {
-          console.error('Error updating user subscription status:', firestoreError);
+        // Get the customer to find the associated user ID
+        const customer = await stripe.customers.retrieve(customerId) as Stripe.Customer;
+        const userId = customer.metadata?.userId;
+        
+        if (!userId) {
+          console.error('No user ID found in customer metadata');
+          break;
         }
+        
+        // Check if Supabase is available
+        if (!supabase) {
+          console.error('Supabase client not initialized, cannot update user subscription');
+          break;
+        }
+        
+        // Get subscription details to update user record
+        const subscription = await stripe.subscriptions.retrieve(invoice.subscription as string);
+        
+        // Calculate new subscription end date
+        const endDate = subscription.current_period_end
+          ? new Date(subscription.current_period_end * 1000)
+          : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+          
+        console.log(`Updating subscription end date for user ${userId} to ${endDate.toISOString()}`);
+        
+        // Update user record with new subscription details
+        const { data, error } = await supabase
+          .from('users')
+          .update({
+            subscription_status: subscription.status,
+            subscription_end_date: endDate.toISOString(),
+            is_pro: true,
+            models_remaining_this_month: 999999,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', userId);
+          
+        if (error) {
+          console.error(`Error updating user ${userId} after invoice payment:`, error);
+        } else {
+          console.log(`Updated user ${userId} subscription after invoice payment`);
+        }
+        
+        break;
+      }
+      
+      case 'customer.subscription.deleted':
+      case 'customer.subscription.updated': {
+        const subscription = event.data.object as Stripe.Subscription;
+        console.log(`Processing subscription ${event.type}: ${subscription.id}`);
+        
+        // Get the customer to find the associated user ID
+        const customerId = subscription.customer as string;
+        console.log(`Subscription for customer: ${customerId}`);
+        
+        const customer = await stripe.customers.retrieve(customerId) as Stripe.Customer;
+        const userId = customer.metadata?.userId;
+        
+        if (!userId) {
+          console.error('No user ID found in customer metadata');
+          break;
+        }
+        
+        // Check if Supabase is available
+        if (!supabase) {
+          console.error('Supabase client not initialized, cannot update user subscription');
+          break;
+        }
+        
+        if (event.type === 'customer.subscription.deleted' || subscription.status === 'canceled') {
+          // Handle subscription cancellation
+          console.log(`Subscription ${subscription.id} canceled for user ${userId}`);
+          
+          const { data, error } = await supabase
+            .from('users')
+            .update({
+              is_pro: false,
+              subscription_status: 'canceled',
+              models_remaining_this_month: 0,
+              updated_at: new Date().toISOString()
+            })
+            .eq('id', userId);
+            
+          if (error) {
+            console.error(`Error updating user ${userId} after subscription cancellation:`, error);
+          } else {
+            console.log(`Updated user ${userId} after subscription cancellation`);
+          }
+        } else {
+          // Update subscription status
+          const endDate = subscription.current_period_end
+            ? new Date(subscription.current_period_end * 1000)
+            : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+            
+          const { data, error } = await supabase
+            .from('users')
+            .update({
+              subscription_status: subscription.status,
+              subscription_end_date: endDate.toISOString(),
+              updated_at: new Date().toISOString()
+            })
+            .eq('id', userId);
+            
+          if (error) {
+            console.error(`Error updating user ${userId} subscription status:`, error);
+          } else {
+            console.log(`Updated user ${userId} subscription status to ${subscription.status}`);
+          }
+        }
+        
         break;
       }
       
@@ -399,11 +470,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         console.log(`Unhandled event type: ${event.type}`);
     }
     
-    // Return a response to acknowledge receipt of the event
-    return res.status(200).json({ received: true, id: event.id });
-    
+    res.json({ received: true });
   } catch (error) {
-    console.error('Error processing webhook:', error);
-    return res.status(500).json({ success: false, message: 'Error processing webhook' });
+    console.error(`Error processing webhook:`, error);
+    res.status(500).json({ success: false, error: 'Error processing webhook' });
   }
 }
