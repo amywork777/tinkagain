@@ -40,14 +40,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Convert price to cents if it's not already
     const priceCents = Math.round(parseFloat(finalPrice) * 100);
     
-    // Create a Stripe price object
+    // Create a product first
+    const product = await stripe.products.create({
+      name: `3D Print: ${modelName}`,
+      description: `Color: ${color}, Material: ${material}, Quantity: ${quantity}, Infill: ${infillPercentage}%`,
+    });
+    
+    console.log(`[${new Date().toISOString()}] Stripe product created: ${product.id}`);
+    
+    // Create a price for the product
     const price = await stripe.prices.create({
       currency: 'usd',
       unit_amount: priceCents,
-      product_data: {
-        name: `3D Print: ${modelName}`,
-        description: `Color: ${color}, Material: ${material}, Quantity: ${quantity}, Infill: ${infillPercentage}%`,
-      },
+      product: product.id,
     });
     
     console.log(`[${new Date().toISOString()}] Stripe price created: ${price.id}`);
