@@ -61,12 +61,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     
     // Get parameters from request body for 3D printing
     const { modelName, color, quantity, finalPrice, stlFileData, stlFileName, stlBase64 } = req.body;
-    
-    if (!modelName || !color || !quantity || !finalPrice) {
-      return res.status(400).json({ 
-        success: false, 
-        message: 'Missing required checkout information' 
-      });
+    console.log('Received request body:', { modelName, color, quantity, finalPrice, stlFileName, hasStlFileData: !!stlFileData, hasStlBase64: !!stlBase64 });
+
+    // Validate required fields
+    if (!modelName || !color || !quantity || !finalPrice || (!stlFileData && !stlBase64) || !stlFileName) {
+      console.error('Missing required fields:', { modelName, color, quantity, finalPrice, stlFileName, hasStlFileData: !!stlFileData, hasStlBase64: !!stlBase64 });
+      return res.status(400).json({ error: 'Missing required fields' });
     }
 
     // Variables to store STL file information
@@ -74,73 +74,58 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     let stlFilePath = '';
     let stlFileUploaded = false;
     
-    // Upload STL file to Firebase if provided
-    const fileData = stlFileData || stlBase64; // Use either stlFileData or stlBase64
-    if (fileData && stlFileName) {
-      try {
-        // Create a unique ID for the file
-        const uniqueId = uuidv4();
-        
-        // Create date-based folder structure
-        const now = new Date();
-        const year = now.getFullYear().toString();
-        const month = (now.getMonth() + 1).toString().padStart(2, '0');
-        const day = now.getDate().toString().padStart(2, '0');
-        
-        // Create the file path in Firebase Storage
-        const timestamp = now.getTime();
-        const safeFileName = stlFileName.replace(/[^a-zA-Z0-9.-]/g, '_');
-        stlFilePath = `stl-files/${year}/${month}/${day}/${timestamp}-${uniqueId}-${safeFileName}`;
-        
-        // Process the STL data
-        let fileBuffer: Buffer;
-        if (fileData.startsWith('data:')) {
-          const base64Data = fileData.split(',')[1];
-          fileBuffer = Buffer.from(base64Data, 'base64');
-        } else {
-          fileBuffer = Buffer.from(fileData, 'base64');
-        }
-        
-        // Upload to Firebase Storage
-        const file = firebaseStorage.file(stlFilePath);
-        await file.save(fileBuffer, {
-          metadata: {
-            contentType: 'model/stl',
-            metadata: {
-              originalName: safeFileName,
-              uploadTime: new Date().toISOString()
-            }
-          }
-        });
-        
-        // Verify the file exists
-        const [exists] = await file.exists();
-        if (!exists) {
-          throw new Error('File failed to upload to Firebase');
-        }
-        
-        // Get a signed URL with long expiration
-        const [signedUrl] = await file.getSignedUrl({
-          action: 'read',
-          expires: Date.now() + 315360000000, // 10 years in milliseconds
-        });
-        
-        if (!signedUrl) {
-          throw new Error('Failed to generate signed URL');
-        }
-        
-        stlDownloadUrl = signedUrl;
-        stlFileUploaded = true;
-        
-        console.log('Successfully uploaded STL file to Firebase:', {
-          path: stlFilePath,
-          downloadUrl: stlDownloadUrl.substring(0, 50) + '...'
-        });
-      } catch (error) {
-        console.error('Error uploading STL file to Firebase:', error);
-        // Continue with checkout even if file upload fails
-      }
+    // Get the STL file data (either from stlFileData or stlBase64)
+    const stlData = stlFileData || stlBase64;
+    if (!stlData) {
+      console.error('No STL data provided');
+      return res.status(400).json({ error: 'No STL file data provided' });
     }
+
+    // Create a unique file path
+    const timestamp = Date.now();
+    const uniqueId = uuidv4();
+    const safeFileName = stlFileName.replace(/[^a-zA-Z0-9.-]/g, '_');
+    const date = new Date();
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    stlFilePath = `new-files/${year}/${month}/${day}/${timestamp}-${uniqueId}-${safeFileName}`;
+    console.log('Generated file path:', stlFilePath);
+
+    // Upload to Firebase Storage
+    const file = firebaseStorage.file(stlFilePath);
+    console.log('Created Firebase file reference');
+
+    // Convert base64 to buffer if needed
+    const buffer = Buffer.from(stlData, 'base64');
+    console.log('Converted STL data to buffer, size:', buffer.length);
+
+    // Upload the file
+    await file.save(buffer, {
+      metadata: {
+        contentType: 'model/stl',
+        metadata: {
+          originalName: stlFileName,
+          uploadTime: new Date().toISOString(),
+        },
+      },
+    });
+    console.log('Successfully uploaded file to Firebase');
+
+    // Get a signed URL (valid for 10 years)
+    const [signedUrl] = await file.getSignedUrl({
+      action: 'read',
+      expires: Date.now() + 10 * 365 * 24 * 60 * 60 * 1000, // 10 years
+    });
+    console.log('Generated signed URL');
+    
+    stlDownloadUrl = signedUrl;
+    stlFileUploaded = true;
+    
+    console.log('Successfully uploaded STL file to Firebase:', {
+      path: stlFilePath,
+      downloadUrl: stlDownloadUrl.substring(0, 50) + '...'
+    });
 
     // Create a product in Stripe for this 3D print
     console.log('Creating Stripe product for 3D print...');
