@@ -1271,8 +1271,8 @@ Download your STL file: ${stlFile.url}`;
           quantity: 1,
         }],
         mode: 'payment',
-        // Modify success URL to go directly to home page or a generic success page
-        success_url: `${process.env.CLIENT_URL || 'http://localhost:3000'}/checkout/success?download=${encodeURIComponent(stlFile.url)}`,
+        // Simplify to a basic thank you page with no parameters
+        success_url: `${process.env.CLIENT_URL || 'http://localhost:3000'}/thank-you`,
         cancel_url: `${process.env.CLIENT_URL || 'http://localhost:3000'}/checkout/cancel`,
         metadata: metadata
       });
