@@ -8,20 +8,7 @@ import { useToast } from "@/hooks/use-toast";
 import { FEATURES } from '@/lib/constants';
 import { Progress } from '@/components/ui/progress';
 
-export const TaiyakiLibrary = () => {
-  return (
-    <div className="w-full h-screen overflow-hidden">
-      <iframe
-        src={process.env.NEXT_PUBLIC_TAIYAKI_LIBRARY_URL || "https://taiyaki.studio/library"}
-        className="w-full h-full"
-        allow="microphone; camera; accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-        allowFullScreen
-      ></iframe>
-    </div>
-  );
-};
-
-export function TaiyakiLibraryOld() {
+export function TaiyakiLibrary() {
   const [isLoading, setIsLoading] = useState(true);
   const { subscription, hasAccess, decrementModelCount } = useSubscription();
   const navigate = useNavigate();
@@ -157,7 +144,7 @@ export function TaiyakiLibraryOld() {
             className="w-full h-full border-0"
             title="Taiyaki Library"
             onLoad={() => setIsLoading(false)}
-            allow="clipboard-write; downloads"
+            allow="microphone; camera; accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
             sandbox="allow-scripts allow-same-origin allow-popups allow-forms allow-downloads allow-modals allow-presentation allow-popups-to-escape-sandbox allow-top-navigation"
           />
         </CardContent>

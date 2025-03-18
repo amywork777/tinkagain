@@ -3,6 +3,13 @@ import { Loader2, ExternalLink, RefreshCcw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card";
 
+// Define props interface
+interface ThangsEmbedProps {
+  modelId: string;
+  height?: string;
+  width?: string;
+}
+
 // The URL to embed
 const THANGS_URL = 'https://thangs.com/search/fish?scope=all&fileTypes=stl&freeModels=true&sort=nDownloads';
 
@@ -17,7 +24,8 @@ const PROXIES = [
 // Proxy names for display
 const PROXY_NAMES = ["CORS.eu.org", "AllOrigins"];
 
-export const ThangsEmbed = ({ modelId, height = "600px", width = "100%" }: ThangsEmbedProps) => {
+// Single model embed component
+export const ThangsModelEmbed = ({ modelId, height = "600px", width = "100%" }: ThangsEmbedProps) => {
   return (
     <div style={{ width, height }}>
       <iframe
@@ -32,6 +40,7 @@ export const ThangsEmbed = ({ modelId, height = "600px", width = "100%" }: Thang
   );
 };
 
+// Browse interface component
 export function ThangsEmbed() {
   const [isLoading, setIsLoading] = useState(true);
   const [hasError, setHasError] = useState(false);
@@ -135,6 +144,7 @@ export function ThangsEmbed() {
                 className="w-full h-full border-0"
                 title="Thangs 3D Models (AllOrigins)"
                 sandbox="allow-scripts allow-same-origin allow-popups allow-forms allow-downloads"
+                allow="microphone; camera; accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
               />
             ) : currentProxyIndex === 0 ? (
               // For cors.eu.org proxy, inject CSS to fix image loading
@@ -168,6 +178,7 @@ export function ThangsEmbed() {
                 referrerPolicy="no-referrer"
                 loading="lazy"
                 sandbox="allow-scripts allow-same-origin allow-popups allow-forms allow-downloads"
+                allow="microphone; camera; accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
               />
             ) : null}
 

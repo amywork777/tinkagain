@@ -3,19 +3,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter }
 import { Info, Lock } from "lucide-react";
 import { useNavigate } from 'react-router-dom';
 
-export const FreeMagicFishAI = () => {
-  return (
-    <div className="w-full h-screen overflow-hidden">
-      <iframe
-        src={process.env.NEXT_PUBLIC_MAGICFISH_URL || "https://www.magicfish.ai"}
-        className="w-full h-full"
-        allow="microphone; camera; accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-        allowFullScreen
-      ></iframe>
-    </div>
-  );
-};
-
 export function FreeMagicFishAI() {
   const navigate = useNavigate();
 
@@ -50,6 +37,7 @@ export function FreeMagicFishAI() {
             className="w-full h-full border-0 pointer-events-none"
             title="Taiyaki AI (Read-only)"
             sandbox="allow-scripts allow-same-origin"
+            allow="microphone; camera; accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
           />
         </CardContent>
         
