@@ -3,24 +3,38 @@ import { Stripe } from 'stripe';
 import * as admin from 'firebase-admin';
 import { v4 as uuidv4 } from 'uuid';
 
-// Initialize Stripe
+// Initialize Stripe with the secret key
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || '', {
   apiVersion: '2023-10-16' as any,
 });
 
-// Initialize Firebase Admin if needed
-let firebaseStorage: admin.storage.Storage;
-if (!admin.apps.length) {
-  admin.initializeApp({
-    credential: admin.credential.cert({
-      projectId: process.env.FIREBASE_PROJECT_ID || '',
-      privateKey: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n') || '',
-      clientEmail: process.env.FIREBASE_CLIENT_EMAIL || '',
-    }),
-    storageBucket: process.env.FIREBASE_STORAGE_BUCKET || 'taiyaki-test1.firebasestorage.app'
-  });
+// Initialize Firebase Admin SDK if not already initialized
+let firebaseStorage: any;
+try {
+  if (!admin.apps.length) {
+    // Try to load service account from environment variable
+    const privateKey = process.env.FIREBASE_PRIVATE_KEY 
+      ? process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n') 
+      : undefined;
+    
+    admin.initializeApp({
+      credential: admin.credential.cert({
+        projectId: process.env.FIREBASE_PROJECT_ID || '',
+        privateKey: privateKey,
+        clientEmail: process.env.FIREBASE_CLIENT_EMAIL || '',
+      }),
+      storageBucket: 'taiyaki-test1.firebasestorage.app'
+    });
+    
+    console.log('Firebase Admin SDK initialized');
+  }
+  
+  // Get the Firebase Storage bucket
+  firebaseStorage = admin.storage().bucket();
+  console.log('Firebase Storage initialized:', firebaseStorage.name);
+} catch (error) {
+  console.error('Error initializing Firebase:', error);
 }
-firebaseStorage = admin.storage();
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   // Set appropriate CORS headers
