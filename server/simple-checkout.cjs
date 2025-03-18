@@ -1271,7 +1271,8 @@ Download your STL file: ${stlFile.url}`;
           quantity: 1,
         }],
         mode: 'payment',
-        success_url: `${process.env.CLIENT_URL || 'http://localhost:3000'}/checkout/success?session_id={CHECKOUT_SESSION_ID}`,
+        // Modify success URL to go directly to home page or a generic success page
+        success_url: `${process.env.CLIENT_URL || 'http://localhost:3000'}/checkout/success?download=${encodeURIComponent(stlFile.url)}`,
         cancel_url: `${process.env.CLIENT_URL || 'http://localhost:3000'}/checkout/cancel`,
         metadata: metadata
       });
@@ -1526,6 +1527,38 @@ app.get('/api/debug-environment', (req, res) => {
     success: true,
     environment: envSummary
   });
+});
+
+// Add a session details endpoint (optional, not part of main checkout flow)
+app.get('/api/checkout/session/:sessionId', async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    
+    if (!sessionId) {
+      return res.status(400).json({ success: false, error: 'Session ID required' });
+    }
+    
+    // Get session from Stripe
+    const session = await stripe.checkout.sessions.retrieve(sessionId);
+    
+    // Return only safe information
+    return res.json({
+      success: true,
+      status: session.status,
+      customerEmail: session.customer_details?.email,
+      amount: session.amount_total,
+      currency: session.currency,
+      downloadUrl: session.metadata?.stlUrl || session.metadata?.downloadLink,
+      completedAt: session.status === 'complete' ? new Date().toISOString() : null
+    });
+  } catch (error) {
+    console.error(`[${new Date().toISOString()}] Error retrieving session:`, error.message);
+    return res.status(400).json({ 
+      success: false, 
+      error: 'Could not retrieve session details',
+      message: error.message
+    });
+  }
 });
 
 // Start the server
