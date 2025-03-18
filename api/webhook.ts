@@ -59,6 +59,7 @@ interface UserData {
 export const config = {
   api: {
     bodyParser: false, // Disable body parsing, needed for Stripe webhook verification
+    maxDuration: 60 // Set maximum execution time to 60 seconds
   },
 };
 

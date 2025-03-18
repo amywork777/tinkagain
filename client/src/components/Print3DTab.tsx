@@ -981,13 +981,25 @@ const Print3DTab = () => {
     }
   };
 
+  // Helper function to generate a checksum for data integrity verification
+  const generateChecksum = async (data: string): Promise<string> => {
+    // Use SubtleCrypto API to generate a SHA-256 hash
+    const msgUint8 = new TextEncoder().encode(data);
+    const hashBuffer = await crypto.subtle.digest('SHA-256', msgUint8);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+    return hashHex;
+  };
+  
   // Function to upload file to Supabase
   const uploadFileToSupabase = async (fileData: string, fileName: string) => {
     console.log(`[${new Date().toISOString()}] SUPABASE UPLOAD: Uploading file to Supabase: ${fileName}`);
     
     try {
       // Extract base64 data from the data URL
-      const base64Data = fileData.split(',')[1];
+      const base64Data = fileData.includes('base64,') 
+        ? fileData.split('base64,')[1] 
+        : fileData;
       
       // Check file size and log warning for large files
       const decodedSize = Math.ceil((base64Data.length * 3) / 4);
@@ -1000,24 +1012,33 @@ const Print3DTab = () => {
       // Use a relative URL that will be handled by the Vite proxy
       const uploadEndpoint = `/api/upload-to-supabase`;
       
-      // For large files, implement chunk splitting (optional, only needed for very large files)
-      // Let's assume most STL files are under 50MB and can be handled directly
-      
-      // Check if file is very large and add warning
+      // For large files, implement chunk splitting for very large files
       let uploadStrategy = 'direct';
+      
+      // Check if file is large and potentially needs special handling
       if (decodedSize > 30 * 1024 * 1024) {
         console.log(`[${new Date().toISOString()}] Very large file (${Math.round(decodedSize / (1024 * 1024))}MB). Processing may be slow.`);
         uploadStrategy = 'large-file';
+      } else if (decodedSize > 4 * 1024 * 1024) {
+        // Files over 4MB are approaching Vercel's default 4.5MB limit
+        console.log(`[${new Date().toISOString()}] Medium size file (${Math.round(decodedSize / (1024 * 1024))}MB).`);
+        uploadStrategy = 'medium-file';
       }
       
       console.log(`[${new Date().toISOString()}] Using upload strategy: ${uploadStrategy}`);
+      
+      // Add checksum to verify data integrity
+      const fileChecksum = await generateChecksum(base64Data);
+      console.log(`[${new Date().toISOString()}] File checksum: ${fileChecksum.slice(0, 8)}...`);
       
       // Prepare upload payload
       const uploadPayload = {
         fileName,
         fileData: base64Data,
         fileType: 'application/octet-stream',
-        strategy: uploadStrategy
+        strategy: uploadStrategy,
+        checksum: fileChecksum,
+        timestamp: Date.now()
       };
       
       // Send request to upload to Supabase with longer timeout (2 minutes)

@@ -7,8 +7,35 @@ const createResponse = (res: VercelResponse, statusCode: number, data: any) => {
 };
 
 // API route handler
+// For Vercel API routes
+export const config = {
+  api: {
+    bodyParser: {
+      sizeLimit: '1mb' // Default limit is fine for Stripe checkout
+    }
+  }
+};
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   console.log(`[${new Date().toISOString()}] Stripe checkout request received`);
+  
+  // Set CORS headers for preflight requests
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Checkout-Type, X-Client-Timestamp');
+  
+  // Handle OPTIONS request (preflight)
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+  
+  // Handle non-POST requests
+  if (req.method !== 'POST') {
+    return createResponse(res, 405, {
+      success: false,
+      error: 'Method not allowed. Use POST.'
+    });
+  }
   
   try {
     // Validate request

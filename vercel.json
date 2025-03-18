@@ -48,7 +48,12 @@
     {
       "src": "/api/upload-to-supabase",
       "dest": "/api/upload-to-supabase.ts",
-      "methods": ["POST", "OPTIONS"]
+      "methods": ["POST", "OPTIONS"],
+      "headers": {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "POST, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type"
+      }
     },
     {
       "src": "/api/print/create-checkout-session",
