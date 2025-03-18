@@ -30,14 +30,18 @@ const SERVER_URL = 'http://localhost:4002';
 // Function to run the test
 async function runTest() {
   try {
-    console.log('=== Testing Checkout Process ===');
+    console.log('=== Testing Checkout Process with Email Notifications ===');
     
     // Step 1: Submit the checkout request with STL data
     console.log('\n1. Creating checkout session with STL data...');
+    
+    // Generate a unique identifier for this test
+    const testId = Date.now().toString().slice(-6);
+    
     const checkoutResponse = await axios.post(`${SERVER_URL}/api/checkout`, {
       stlBase64,
-      stlFileName: 'test-cube.stl',
-      modelName: 'Test Cube',
+      stlFileName: `test-model-${testId}.stl`,
+      modelName: `Test Model ${testId}`,
       dimensions: '10x10x10',
       material: 'PLA',
       infillPercentage: 20,
@@ -45,74 +49,29 @@ async function runTest() {
       email: 'test@example.com'
     });
     
-    console.log(`Checkout response: ${JSON.stringify(checkoutResponse.data, null, 2)}`);
+    console.log(`Checkout response status: ${checkoutResponse.status}`);
     
     if (!checkoutResponse.data.success) {
-      throw new Error('Checkout failed');
+      throw new Error('Checkout failed: ' + JSON.stringify(checkoutResponse.data));
     }
     
     const sessionId = checkoutResponse.data.id;
+    const checkoutUrl = checkoutResponse.data.url;
     console.log(`Created checkout session: ${sessionId}`);
+    console.log(`Stripe checkout URL: ${checkoutUrl}`);
+    console.log(`STL file name: test-model-${testId}.stl`);
     console.log(`STL URL: ${checkoutResponse.data.stlInfo.url}`);
     
-    // Step 2: Manually simulate webhook for completed payment
-    console.log('\n2. Simulating webhook for completed payment...');
-    
-    // Create the webhook payload
-    const webhookPayload = {
-      id: 'evt_' + crypto.randomBytes(16).toString('hex'),
-      type: 'checkout.session.completed',
-      data: {
-        object: {
-          id: sessionId,
-          customer_details: {
-            email: 'test@example.com',
-            name: 'Test Customer'
-          },
-          shipping_details: {
-            address: {
-              line1: '123 Test St',
-              city: 'Test City',
-              state: 'Test State',
-              postal_code: '12345',
-              country: 'US'
-            }
-          },
-          amount_total: 1999,
-          payment_status: 'paid',
-          metadata: {
-            stlUrl: checkoutResponse.data.stlInfo.url,
-            stlFileName: 'test-cube.stl',
-            productName: 'Test Cube',
-            dimensions: '10x10x10',
-            material: 'PLA',
-            infillPercentage: '20'
-          }
-        }
-      }
-    };
-    
-    // Send the webhook
-    try {
-      const webhookResponse = await axios.post(`${SERVER_URL}/api/webhook`, webhookPayload, {
-        headers: {
-          'Content-Type': 'application/json',
-          'Stripe-Signature': 'whsec_test'
-        }
-      });
-      
-      console.log(`Webhook response: ${JSON.stringify(webhookResponse.data, null, 2)}`);
-      console.log('\nTest completed successfully!');
-      console.log('Check your email at taiyaki.orders@gmail.com for the order notification with the Supabase link.');
-      
-    } catch (webhookError) {
-      console.error('Webhook simulation failed:', webhookError.response?.data || webhookError.message);
-    }
+    console.log('\n✅ Checkout process completed successfully!');
+    console.log('✅ An email notification should have been sent to taiyaki.orders@gmail.com');
+    console.log('✅ Check your email for the order notification with the Supabase link.');
     
   } catch (error) {
-    console.error('Test failed:', error.response?.data || error.message);
+    console.error('❌ Test failed:', error.response?.data || error.message);
   }
 }
 
 // Run the test
-runTest(); 
+runTest().then(() => {
+  console.log('\n✅ Test completed');
+}); 

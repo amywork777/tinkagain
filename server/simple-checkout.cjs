@@ -7,6 +7,7 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const crypto = require('crypto');
+const nodemailer = require('nodemailer');
 
 // Load environment variables first
 dotenv.config({ path: path.resolve(process.cwd(), '.env.local') });
@@ -272,6 +273,25 @@ async function storeSTLFile(stlBase64, fileName) {
     
     throw error;
   }
+}
+
+// Create email transporter for notifications
+let transporter = null;
+try {
+  if (process.env.EMAIL_USER && (process.env.EMAIL_PASS || process.env.EMAIL_PASSWORD)) {
+    transporter = nodemailer.createTransport({
+      service: 'gmail',
+      auth: {
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASS || process.env.EMAIL_PASSWORD // Check both variables
+      },
+    });
+    console.log(`[${new Date().toISOString()}] Email notifications configured for ${process.env.EMAIL_USER}`);
+  } else {
+    console.log(`[${new Date().toISOString()}] Email notification credentials not found in environment`);
+  }
+} catch (emailError) {
+  console.error(`[${new Date().toISOString()}] Error setting up email transport:`, emailError);
 }
 
 // Main checkout endpoint
