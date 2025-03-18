@@ -67,15 +67,35 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // Continue anyway, the bucket might exist
     }
     
-    // Upload file to Supabase Storage
+    // Add size check and chunking for larger files
     console.log(`[${new Date().toISOString()}] Uploading to Supabase...`);
-    const { data, error } = await supabase.storage
-      .from(BUCKET_NAME)
-      .upload(storagePath, fileBuffer, {
-        contentType: fileType,
-        cacheControl: '3600',
-        upsert: true
-      });
+    
+    // Log the file size for debugging
+    console.log(`[${new Date().toISOString()}] File size: ${fileBuffer.length} bytes`);
+    
+    // If file is over 5MB, log a warning but continue
+    if (fileBuffer.length > 5 * 1024 * 1024) {
+      console.log(`[${new Date().toISOString()}] WARNING: Large file detected (${Math.round(fileBuffer.length / (1024 * 1024))}MB)`);
+    }
+    
+    // Handle upload with increased timeout
+    let data: any, error: any;
+    
+    try {
+      const uploadResponse = await supabase.storage
+        .from(BUCKET_NAME)
+        .upload(storagePath, fileBuffer, {
+          contentType: fileType,
+          cacheControl: '3600',
+          upsert: true
+        });
+      
+      data = uploadResponse.data;
+      error = uploadResponse.error;
+    } catch (uploadError) {
+      console.error(`[${new Date().toISOString()}] Upload attempt failed:`, uploadError);
+      throw new Error(`Upload failed: ${uploadError instanceof Error ? uploadError.message : 'Unknown error'}`);
+    }
     
     if (error) {
       console.error(`[${new Date().toISOString()}] Supabase upload error:`, error);

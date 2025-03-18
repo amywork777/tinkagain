@@ -67,7 +67,11 @@ interface UploadedModelData {
 // Load Stripe outside of a component's render to avoid recreating the Stripe object on every render
 const stripePromise = import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY
   ? loadStripe(import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY)
-  : loadStripe('pk_live_51QIaT9CLoBz9jXRlVEQ99Q6V4UiRSYy8ZS49MelsW8EfX1mEijh3K5JQEe5iysIL31cGtf2IsTVIyV1mivoUHCUI00aPpz3GMi'); // Fallback key
+  : loadStripe('pk_live_51QIaT9CLoBz9jXRlVEQ99Q6V4UiRSYy8ZS49MelsW8EfX1mEijh3K5JQEe5iysIL31cGtf2IsTVIyV1mivoUHCUI00aPpz3GMi'); // Production fallback key
+
+// Log Stripe initialization for debugging
+console.log(`[${new Date().toISOString()}] Stripe initialization with key: ${import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY ? 'Environment key' : 'Fallback key'}`);
+console.log(`[${new Date().toISOString()}] Stripe key type: ${import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY?.startsWith('pk_test') ? 'TEST' : 'LIVE'}`);
 
 const Print3DTab = () => {
   const { models, selectedModelIndex, exportSelectedModelAsSTL, selectModel } = useScene();
@@ -853,34 +857,47 @@ const Print3DTab = () => {
           
           checkoutData.modelName = stlFileName.replace(/\.[^/.]+$/, ""); // Remove file extension
           
-          // Extract the file data - guarded access to uploadedModelData
-          if (typeof uploadedModelData === 'object' && 'fileData' in uploadedModelData &&
-              uploadedModelData.fileData && typeof uploadedModelData.fileData === 'string') {
-            stlFileData = uploadedModelData.fileData;
-          } else if (typeof uploadedModelData === 'object' && 'blob' in uploadedModelData && 
-                    uploadedModelData.blob instanceof Blob) {
-            return new Promise<void>((resolve, reject) => {
-              const reader = new FileReader();
-              reader.onload = async (event) => {
-                if (event.target?.result) {
-                  stlFileData = event.target.result as string;
-                  // Upload file to Supabase
-                  try {
-                    await uploadFileToSupabase(stlFileData, stlFileName);
-                    // After upload, proceed with checkout
-                    await initiateStripeCheckout(checkoutData);
-                    resolve();
-                  } catch (error) {
-                    reject(error);
+          // Extract the file data from uploadedModelData - improved
+          console.log(`[${new Date().toISOString()}] Processing uploadedModelData type: ${typeof uploadedModelData}`);
+          
+          // Handle both object structure and direct data storage patterns
+          if (typeof uploadedModelData === 'object') {
+            if ('data' in uploadedModelData && uploadedModelData.data) {
+              console.log(`[${new Date().toISOString()}] Found data property in uploadedModelData`);
+              // This is coming from the upload handler
+              stlFileData = typeof uploadedModelData.data === 'string' 
+                ? uploadedModelData.data 
+                : `data:application/octet-stream;base64,${Buffer.from(uploadedModelData.data as ArrayBuffer).toString('base64')}`;
+            } else if ('fileData' in uploadedModelData && uploadedModelData.fileData) {
+              console.log(`[${new Date().toISOString()}] Found fileData property in uploadedModelData`);
+              stlFileData = uploadedModelData.fileData as string;
+            } else if ('blob' in uploadedModelData && uploadedModelData.blob instanceof Blob) {
+              console.log(`[${new Date().toISOString()}] Found blob property in uploadedModelData`);
+              return new Promise<void>((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = async (event) => {
+                  if (event.target?.result) {
+                    stlFileData = event.target.result as string;
+                    // Upload file to Supabase
+                    try {
+                      await uploadFileToSupabase(stlFileData, stlFileName);
+                      // After upload, proceed with checkout
+                      await initiateStripeCheckout(checkoutData);
+                      resolve();
+                    } catch (error) {
+                      reject(error);
+                    }
+                  } else {
+                    reject(new Error("Failed to read uploaded STL blob"));
                   }
-                } else {
-                  reject(new Error("Failed to read uploaded STL blob"));
-                }
-              };
-              reader.onerror = () => reject(reader.error);
-              // Safe to call since we already checked it's a Blob
-              reader.readAsDataURL(uploadedModelData.blob as Blob);
-            });
+                };
+                reader.onerror = () => reject(reader.error);
+                reader.readAsDataURL(uploadedModelData.blob as Blob);
+              });
+            }
+          } else if (typeof uploadedModelData === 'string') {
+            console.log(`[${new Date().toISOString()}] uploadedModelData is string`);
+            stlFileData = uploadedModelData;
           }
         }
         
@@ -972,6 +989,14 @@ const Print3DTab = () => {
       // Extract base64 data from the data URL
       const base64Data = fileData.split(',')[1];
       
+      // Check file size and log warning for large files
+      const decodedSize = Math.ceil((base64Data.length * 3) / 4);
+      console.log(`[${new Date().toISOString()}] Estimated file size: ${Math.round(decodedSize / 1024)}KB`);
+      
+      if (decodedSize > 5 * 1024 * 1024) {
+        console.log(`[${new Date().toISOString()}] Large file detected (${Math.round(decodedSize / (1024 * 1024))}MB). Processing may take longer.`);
+      }
+      
       // Use a relative URL that will be handled by the Vite proxy
       const uploadEndpoint = `/api/upload-to-supabase`;
       
@@ -982,14 +1007,21 @@ const Print3DTab = () => {
         fileType: 'application/octet-stream'
       };
       
-      // Send request to upload to Supabase
+      // Send request to upload to Supabase with longer timeout
+      console.log(`[${new Date().toISOString()}] Sending upload request to ${uploadEndpoint}`);
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 second timeout
+      
       const response = await fetch(uploadEndpoint, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify(uploadPayload)
+        body: JSON.stringify(uploadPayload),
+        signal: controller.signal
       });
+      
+      clearTimeout(timeoutId);
       
       if (!response.ok) {
         throw new Error(`Server responded with status: ${response.status}`);
