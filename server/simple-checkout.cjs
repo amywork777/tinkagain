@@ -506,403 +506,269 @@ function createFileUrl(relativePath, isLocal = false) {
   return url;
 }
 
-// Helper function to store STL files
-async function storeSTLFile(stlData, fileName) {
+// Function to store an STL file and return its URL
+async function storeSTLFile(stlData, originalFileName) {
   console.log('[' + new Date().toISOString() + '] Starting STL file storage process');
+  
   try {
-    // Sanitize the file name
-    const safeFileName = fileName.replace(/[^a-zA-Z0-9.-]/g, '-');
-    if (safeFileName !== fileName) {
-      console.log('[' + new Date().toISOString() + '] Sanitized filename from "' + fileName + '" to "' + safeFileName + '"');
-      fileName = safeFileName;
-    }
+    // Sanitize the filename (remove spaces, special characters)
+    const sanitizedFileName = originalFileName.replace(/[^a-zA-Z0-9.-]/g, '-').toLowerCase();
+    console.log('[' + new Date().toISOString() + '] Sanitized filename from "' + originalFileName + '" to "' + sanitizedFileName + '"');
     
-    // Log the data type and length
+    // Check type of stlData
     console.log('[' + new Date().toISOString() + '] STL data type:', typeof stlData);
     console.log('[' + new Date().toISOString() + '] STL data length:', stlData.length);
     
-    // Process the STL data - try to decode base64
+    // Determine if the data is base64 or a data URL
     let stlBuffer;
-    try {
-      // Check if the data starts with "data:model/stl" or similar
-      if (typeof stlData === 'string' && stlData.startsWith('data:')) {
-        console.log('[' + new Date().toISOString() + '] STL data appears to be a data URL, extracting...');
-        const base64Data = stlData.split(';base64,').pop();
-        stlBuffer = Buffer.from(base64Data, 'base64');
-      }
-      // Check if it's base64 encoded without a header
-      else if (typeof stlData === 'string' && stlData.match(/^[A-Za-z0-9+/=]+$/)) {
-        console.log('[' + new Date().toISOString() + '] STL data appears to be base64 encoded, decoding...');
-        stlBuffer = Buffer.from(stlData, 'base64');
-      } 
-      // Check if it's binary data directly
-      else if (stlData instanceof Buffer || stlData instanceof Uint8Array) {
-        console.log('[' + new Date().toISOString() + '] STL data is already a buffer');
-        stlBuffer = Buffer.from(stlData);
-      }
-      // Otherwise, treat as raw string data (ASCII STL)
-      else {
-        console.log('[' + new Date().toISOString() + '] STL data appears to be raw text data, treating as ASCII STL');
-        stlBuffer = Buffer.from(stlData);
-      }
-      
-      console.log('[' + new Date().toISOString() + '] Decoded STL buffer size:', stlBuffer.length);
-      
-      // Verify this looks like an STL file
-      if (stlBuffer.length < 10) {
-        console.error('[' + new Date().toISOString() + '] Warning: STL buffer too small, may not be valid STL data');
-      } else {
-        // Check if it's a binary STL (starts with header then has 4-byte face count)
-        // or ASCII STL (starts with "solid")
-        const headerStr = stlBuffer.toString('utf8', 0, 5).toLowerCase();
-        if (headerStr === 'solid') {
-          console.log('[' + new Date().toISOString() + '] STL appears to be ASCII format');
-        } else {
-          console.log('[' + new Date().toISOString() + '] STL appears to be binary format');
-        }
-      }
-    } catch (error) {
-      console.error('[' + new Date().toISOString() + '] Error decoding STL data:', error);
-      throw new Error('Failed to decode STL data: ' + error.message);
+    let isBinary = false;
+    
+    if (stlData.startsWith('data:')) {
+      console.log('[' + new Date().toISOString() + '] STL data appears to be a data URL, extracting...');
+      // Extract the base64 data from the data URL
+      const base64Data = stlData.split(',')[1];
+      stlBuffer = Buffer.from(base64Data, 'base64');
+    } else if (/^[A-Za-z0-9+/=]+$/.test(stlData)) {
+      console.log('[' + new Date().toISOString() + '] STL data appears to be base64 encoded');
+      stlBuffer = Buffer.from(stlData, 'base64');
+    } else {
+      console.log('[' + new Date().toISOString() + '] STL data does not appear to be base64 encoded, treating as raw data');
+      stlBuffer = Buffer.from(stlData);
     }
     
-    // Create a unique identifier for this file
-    const timestamp = Date.now();
-    const uniqueId = require('crypto').randomUUID();
+    console.log('[' + new Date().toISOString() + '] Decoded STL buffer size:', stlBuffer.length);
     
-    // Create a timestamp-based directory structure for Supabase
+    // Check if the STL is in binary format (binary STL starts with "solid" if it's ASCII)
+    const headerStr = stlBuffer.toString('utf8', 0, 5).toLowerCase();
+    if (headerStr !== 'solid') {
+      console.log('[' + new Date().toISOString() + '] STL appears to be binary format');
+      isBinary = true;
+    } else {
+      console.log('[' + new Date().toISOString() + '] STL appears to be ASCII format');
+    }
+    
+    // Generate a unique filename with date structure YYYY/MM/DD
     const now = new Date();
-    const year = now.getUTCFullYear();
-    const month = String(now.getUTCMonth() + 1).padStart(2, '0');
-    const day = String(now.getUTCDate()).padStart(2, '0');
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    const timestamp = now.getTime();
+    const uuid = require('crypto').randomUUID();
     
-    // Define the storage path in Supabase
-    const storagePath = `models/${year}/${month}/${day}/${timestamp}-${uniqueId}-${fileName}`;
-    console.log('[' + new Date().toISOString() + '] Supabase storage path:', storagePath);
+    // Create file path with date-based directory structure
+    const fileDir = `models/${year}/${month}/${day}`;
+    const filename = `${timestamp}-${uuid}-${sanitizedFileName}`;
+    const filePath = `${fileDir}/${filename}`;
     
-    // Get the bucket name with fallback
-    const bucketName = process.env.SUPABASE_STORAGE_BUCKET || 'stl-models';
+    console.log('[' + new Date().toISOString() + '] Supabase storage path:', filePath);
     
-    // DEVELOPMENT MODE: First try to use local file storage if we're not in production
-    if (process.env.NODE_ENV !== 'production') {
+    // Attempt to store in Supabase if available
+    if (supabase && process.env.NODE_ENV === 'production') {
+      // Always prioritize Supabase in production
+      console.log('[' + new Date().toISOString() + '] Prioritizing Supabase storage in production mode');
+      
       try {
-        // Skip automatic local file storage in development mode to prioritize Supabase
-        // Only use local storage as fallback if Supabase fails
-        console.log('[' + new Date().toISOString() + '] Prioritizing Supabase storage even in development mode');
-      } catch (localStorageError) {
-        console.error('[' + new Date().toISOString() + '] Error using local file storage:', localStorageError.message);
-        console.log('[' + new Date().toISOString() + '] Falling back to Supabase storage...');
-      }
-    }
-    
-    // Upload the STL data to Supabase storage
-    console.log('[' + new Date().toISOString() + '] Uploading STL file to Supabase storage...');
-    
-    // Check if Supabase is initialized
-    if (!supabase) {
-      console.warn('[' + new Date().toISOString() + '] Supabase client is not initialized. Using local file fallback.');
-      
-      // Local file fallback since Supabase isn't available
-      // Create local directory for files
-      const localStorageDir = path.join(process.cwd(), 'local-storage', 'stl-files');
-      const fullStoragePath = path.join(localStorageDir, year.toString(), month, day);
-      
-      // Create directories if they don't exist
-      fs.mkdirSync(fullStoragePath, { recursive: true });
-      
-      // Write the file locally
-      const localFilePath = path.join(fullStoragePath, `${timestamp}-${uniqueId}-${fileName}`);
-      fs.writeFileSync(localFilePath, stlBuffer);
-      
-      console.log('[' + new Date().toISOString() + '] Saved STL file locally to:', localFilePath);
-      
-      // Create a local file URL
-      const fileUrl = createFileUrl(`stl-files/${year}/${month}/${day}/${timestamp}-${uniqueId}-${fileName}`, true);
-      
-      console.log('[' + new Date().toISOString() + '] Created local file URL:', fileUrl);
-      
-      return {
-        fileName,
-        url: fileUrl,
-        path: `local-storage/${storagePath}`,
-        size: stlBuffer.length,
-        isLocalStorage: true
-      };
-    }
-    
-    // Try direct upload first
-    try {
-      // Log more details about the upload attempt
-      console.log('[' + new Date().toISOString() + '] Attempting Supabase upload to bucket:', bucketName);
-      console.log('[' + new Date().toISOString() + '] File path:', storagePath);
-      
-      const { data, error } = await supabase.storage
-        .from(bucketName)
-        .upload(storagePath, stlBuffer, {
-          contentType: 'application/vnd.ms-pki.stl',
-          upsert: true,
-          cacheControl: '31536000' // 1 year cache
-        });
-      
-      if (error) {
-        // Log detailed error information
-        console.error('[' + new Date().toISOString() + '] Supabase upload error details:', JSON.stringify(error));
+        const { data, error } = await uploadToSupabase(filePath, stlBuffer);
         
-        // If bucket not found, try to find available buckets
-        if (error.message && (error.message.includes('Bucket not found') || error.message.includes('not found'))) {
-          console.warn('[' + new Date().toISOString() + '] Bucket not found. Trying local file storage...');
-          
-          // Try to list available buckets for debugging
-          try {
-            const { data: buckets, error: bucketError } = await supabase.storage.listBuckets();
-            if (bucketError) {
-              console.error('[' + new Date().toISOString() + '] Error listing buckets:', bucketError.message);
-            } else {
-              console.log('[' + new Date().toISOString() + '] Available buckets:', buckets.map(b => b.name).join(', '));
-            }
-          } catch (bucketListError) {
-            console.error('[' + new Date().toISOString() + '] Error checking buckets:', bucketListError.message);
-          }
-          
-          // Use local file storage as fallback
-          const localStorageDir = path.join(process.cwd(), 'local-storage', 'stl-files');
-          const fullStoragePath = path.join(localStorageDir, year.toString(), month, day);
-          
-          // Create directories if they don't exist
-          fs.mkdirSync(fullStoragePath, { recursive: true });
-          
-          // Write the file locally
-          const localFilePath = path.join(fullStoragePath, `${timestamp}-${uniqueId}-${fileName}`);
-          fs.writeFileSync(localFilePath, stlBuffer);
-          
-          console.log('[' + new Date().toISOString() + '] Saved STL file locally to:', localFilePath);
-          
-          // Create a local file URL
-          const fileUrl = createFileUrl(`stl-files/${year}/${month}/${day}/${timestamp}-${uniqueId}-${fileName}`, true);
-          
-          console.log('[' + new Date().toISOString() + '] Created local file URL:', fileUrl);
-          
-          return {
-            fileName,
-            url: fileUrl,
-            path: `local-storage/${storagePath}`,
-            size: stlBuffer.length,
-            isLocalStorage: true
-          };
-        } else {
-          throw error;
-        }
-      }
-      
-      console.log('[' + new Date().toISOString() + '] STL file uploaded successfully to Supabase storage:', data.path);
-      
-      // Create a signed URL valid for 10 years
-      const expirySeconds = 60 * 60 * 24 * 365 * 10; // 10 years
-      
-      console.log('[' + new Date().toISOString() + '] Creating signed URL for file:', storagePath);
-      const { data: urlData, error: urlError } = await supabase.storage
-        .from(bucketName)
-        .createSignedUrl(storagePath, expirySeconds);
-      
-      if (urlError) {
-        console.error('[' + new Date().toISOString() + '] Error creating signed URL:', urlError.message);
-        
-        // Try to get the public URL as a fallback
-        try {
-          const { data: publicUrlData } = supabase.storage
-            .from(bucketName)
-            .getPublicUrl(storagePath);
-          
-          const signedUrl = publicUrlData.publicUrl;
-          console.log('[' + new Date().toISOString() + '] Fallback to public URL (first 100 chars):', signedUrl.substring(0, 100) + '...');
-          
-          return {
-            fileName,
-            url: signedUrl,
-            path: storagePath,
-            size: stlBuffer.length,
-            isSupabase: true
-          };
-        } catch (fallbackError) {
-          console.error('[' + new Date().toISOString() + '] Failed to get public URL:', fallbackError.message);
-          throw urlError;
-        }
-      }
-      
-      const signedUrl = urlData.signedUrl;
-      console.log('[' + new Date().toISOString() + '] Generated signed URL (first 100 chars):', signedUrl.substring(0, 100) + '...');
-      
-      return {
-        fileName,
-        url: signedUrl,
-        path: storagePath,
-        size: stlBuffer.length,
-        isSupabase: true
-      };
-      
-    } catch (error) {
-      console.error('[' + new Date().toISOString() + '] Error uploading STL to Supabase storage:', error.message);
-      
-      // Try writing to a temp file and uploading as a fallback
-      try {
-        // If bucket not found, try to find available buckets
-        if (error.message && (error.message.includes('Bucket not found') || error.message.includes('not found'))) {
-          console.warn('[' + new Date().toISOString() + '] Bucket not found. Trying local file storage...');
-          
-          // Use local file storage as fallback
-          const localStorageDir = path.join(process.cwd(), 'local-storage', 'stl-files');
-          const fullStoragePath = path.join(localStorageDir, year.toString(), month, day);
-          
-          // Create directories if they don't exist
-          fs.mkdirSync(fullStoragePath, { recursive: true });
-          
-          // Write the file locally
-          const localFilePath = path.join(fullStoragePath, `${timestamp}-${uniqueId}-${fileName}`);
-          fs.writeFileSync(localFilePath, stlBuffer);
-          
-          console.log('[' + new Date().toISOString() + '] Saved STL file locally to:', localFilePath);
-          
-          // Create a local file URL
-          const fileUrl = createFileUrl(`stl-files/${year}/${month}/${day}/${timestamp}-${uniqueId}-${fileName}`, true);
-          
-          console.log('[' + new Date().toISOString() + '] Created local file URL:', fileUrl);
-          
-          return {
-            fileName,
-            url: fileUrl,
-            path: `local-storage/${storagePath}`,
-            size: stlBuffer.length,
-            isLocalStorage: true
-          };
-        }
-        
-        console.log('[' + new Date().toISOString() + '] Falling back to file-based upload...');
-        
-        // Create a temporary file
-        const tempDir = path.join(os.tmpdir(), 'stl-uploads');
-        
-        // Ensure the directory exists
-        if (!fs.existsSync(tempDir)) {
-          fs.mkdirSync(tempDir, { recursive: true });
-        }
-        
-        const tempFilePath = path.join(tempDir, `${timestamp}-${uniqueId}-${fileName}`);
-        
-        // Write the buffer to a file
-        fs.writeFileSync(tempFilePath, stlBuffer);
-        
-        // Create a read stream from the file
-        const fileStream = fs.createReadStream(tempFilePath);
-        
-        // Upload the file stream
-        const { data, error } = await supabase.storage
-          .from(bucketName)
-          .upload(storagePath, fileStream, {
-            contentType: 'application/vnd.ms-pki.stl',
-            upsert: true,
-            cacheControl: '31536000', // 1 year cache
-            duplex: 'half' // Help with streaming issues
-          });
-          
         if (error) {
-          // If bucket not found, use local storage
-          if (error.message && (error.message.includes('Bucket not found') || error.message.includes('not found'))) {
-            console.warn('[' + new Date().toISOString() + '] Bucket not found. Using local file storage...');
+          console.error('[' + new Date().toISOString() + '] Error uploading to Supabase:', error.message);
+          
+          // In production, try one more time
+          if (process.env.NODE_ENV === 'production') {
+            console.log('[' + new Date().toISOString() + '] Retrying Supabase upload in production...');
+            const retryResult = await uploadToSupabase(filePath, stlBuffer);
             
-            // Use local file storage
-            const localStorageDir = path.join(process.cwd(), 'local-storage', 'stl-files');
-            const fullStoragePath = path.join(localStorageDir, year.toString(), month, day);
-            
-            // Create directories if they don't exist
-            fs.mkdirSync(fullStoragePath, { recursive: true });
-            
-            // Just move the temp file to our local storage
-            const localFilePath = path.join(fullStoragePath, `${timestamp}-${uniqueId}-${fileName}`);
-            fs.copyFileSync(tempFilePath, localFilePath);
-            
-            console.log('[' + new Date().toISOString() + '] Saved STL file locally to:', localFilePath);
-            
-            // Create a local file URL
-            const fileUrl = createFileUrl(`stl-files/${year}/${month}/${day}/${timestamp}-${uniqueId}-${fileName}`, true);
-            
-            console.log('[' + new Date().toISOString() + '] Created local file URL:', fileUrl);
-            
-            // Clean up the temporary file
-            try {
-              fs.unlinkSync(tempFilePath);
-            } catch (cleanupError) {
-              console.warn('[' + new Date().toISOString() + '] Failed to delete temporary file:', cleanupError.message);
+            if (retryResult.error) {
+              console.error('[' + new Date().toISOString() + '] Retry also failed:', retryResult.error.message);
+              throw new Error('Failed to upload STL file to Supabase storage: ' + retryResult.error.message);
             }
+            
+            // Successful retry
+            const signedUrl = await getSupabaseSignedUrl(filePath);
+            console.log('[' + new Date().toISOString() + '] Retry successful, generated signed URL');
             
             return {
-              fileName,
-              url: fileUrl,
-              path: `local-storage/${storagePath}`,
-              size: stlBuffer.length,
-              isLocalStorage: true
+              url: signedUrl,
+              path: filePath,
+              fileName: sanitizedFileName,
+              storedAt: 'supabase',
+              fileSize: stlBuffer.length,
+              isBinary
             };
           }
-          throw error;
+          
+          // Fall back to local storage
+          console.log('[' + new Date().toISOString() + '] Falling back to local storage');
+          return await storeLocally(fileDir, filename, stlBuffer, sanitizedFileName, isBinary);
         }
         
-        console.log('[' + new Date().toISOString() + '] STL file uploaded successfully via file stream');
+        // Get a signed URL
+        const signedUrl = await getSupabaseSignedUrl(filePath);
+        console.log('[' + new Date().toISOString() + '] Generated signed URL (first 100 chars):', signedUrl.substring(0, 100) + '...');
         
-        // Clean up the temporary file
-        try {
-          fs.unlinkSync(tempFilePath);
-        } catch (cleanupError) {
-          console.warn('[' + new Date().toISOString() + '] Failed to delete temporary file:', cleanupError.message);
-        }
-      } catch (fallbackError) {
-        console.error('[' + new Date().toISOString() + '] Fallback upload also failed:', fallbackError.message);
+        console.log('[' + new Date().toISOString() + '] STL file stored successfully in Supabase storage:', filePath);
         
-        // Last resort: local file storage
-        try {
-          console.log('[' + new Date().toISOString() + '] All Supabase methods failed. Using local file storage as last resort.');
-          
-          // Use local file storage
-          const localStorageDir = path.join(process.cwd(), 'local-storage', 'stl-files');
-          const fullStoragePath = path.join(localStorageDir, year.toString(), month, day);
-          
-          // Create directories if they don't exist
-          fs.mkdirSync(fullStoragePath, { recursive: true });
-          
-          // Write the file locally
-          const localFilePath = path.join(fullStoragePath, `${timestamp}-${uniqueId}-${fileName}`);
-          fs.writeFileSync(localFilePath, stlBuffer);
-          
-          console.log('[' + new Date().toISOString() + '] Saved STL file locally to:', localFilePath);
-          
-          // Create a local file URL
-          const fileUrl = createFileUrl(`stl-files/${year}/${month}/${day}/${timestamp}-${uniqueId}-${fileName}`, true);
-          
-          console.log('[' + new Date().toISOString() + '] Created local file URL:', fileUrl);
-          
-          return {
-            fileName,
-            url: fileUrl,
-            path: `local-storage/${storagePath}`,
-            size: stlBuffer.length,
-            isLocalStorage: true
-          };
-        } catch (lastResortError) {
-          console.error('[' + new Date().toISOString() + '] Even local storage failed:', lastResortError.message);
-          throw new Error('Failed to store STL file anywhere: ' + lastResortError.message);
+        return {
+          url: signedUrl,
+          path: filePath,
+          fileName: sanitizedFileName,
+          storedAt: 'supabase',
+          fileSize: stlBuffer.length,
+          isBinary
+        };
+      } catch (supabaseError) {
+        console.error('[' + new Date().toISOString() + '] Error in Supabase storage:', supabaseError.message);
+        
+        // In production, we should try to upload to local storage as a last resort
+        if (process.env.NODE_ENV === 'production') {
+          console.log('[' + new Date().toISOString() + '] Attempting local storage as final fallback in production');
+          return await storeLocally(fileDir, filename, stlBuffer, sanitizedFileName, isBinary);
         }
+        
+        throw new Error('Failed to upload STL file to storage: ' + supabaseError.message);
       }
+    } else if (supabase && process.env.NODE_ENV === 'development' && process.env.PRIORITIZE_SUPABASE === 'true') {
+      // In development, use Supabase if explicitly prioritized
+      console.log('[' + new Date().toISOString() + '] Prioritizing Supabase storage even in development mode');
+      
+      try {
+        console.log('[' + new Date().toISOString() + '] Uploading STL file to Supabase storage...');
+        console.log('[' + new Date().toISOString() + '] Attempting Supabase upload to bucket:', 'stl-files');
+        console.log('[' + new Date().toISOString() + '] File path:', filePath);
+        
+        const { data, error } = await uploadToSupabase(filePath, stlBuffer);
+        
+        if (error) {
+          console.error('[' + new Date().toISOString() + '] Error uploading to Supabase:', error.message);
+          // Fall back to local storage in development
+          console.log('[' + new Date().toISOString() + '] Falling back to local storage');
+          return await storeLocally(fileDir, filename, stlBuffer, sanitizedFileName, isBinary);
+        }
+        
+        console.log('[' + new Date().toISOString() + '] STL file uploaded successfully to Supabase storage:', filePath);
+        
+        // Get a signed URL
+        console.log('[' + new Date().toISOString() + '] Creating signed URL for file:', filePath);
+        const signedUrl = await getSupabaseSignedUrl(filePath);
+        console.log('[' + new Date().toISOString() + '] Generated signed URL (first 100 chars):', signedUrl.substring(0, 100) + '...');
+        
+        console.log('[' + new Date().toISOString() + '] STL file stored successfully:', filePath);
+        
+        return {
+          url: signedUrl,
+          path: filePath,
+          fileName: sanitizedFileName,
+          storedAt: 'supabase',
+          fileSize: stlBuffer.length,
+          isBinary
+        };
+      } catch (supabaseError) {
+        console.error('[' + new Date().toISOString() + '] Supabase storage error:', supabaseError.message);
+        // Fall back to local storage in development
+        console.log('[' + new Date().toISOString() + '] Falling back to local storage after Supabase error');
+        return await storeLocally(fileDir, filename, stlBuffer, sanitizedFileName, isBinary);
+      }
+    } else {
+      // Default to local storage for development
+      console.log('[' + new Date().toISOString() + '] Using local file storage for development mode');
+      return await storeLocally(fileDir, filename, stlBuffer, sanitizedFileName, isBinary);
     }
-    
-    console.log('[' + new Date().toISOString() + '] STL file stored successfully');
-    
-    return {
-      fileName,
-      url: signedUrl,
-      path: storagePath,
-      size: stlBuffer.length
-    };
   } catch (error) {
     console.error('[' + new Date().toISOString() + '] Error in storeSTLFile:', error.message);
+    throw new Error('Failed to upload STL file to storage: ' + error.message);
+  }
+}
+
+// Helper function to upload file to Supabase
+async function uploadToSupabase(filePath, buffer) {
+  if (!supabase) {
+    return { data: null, error: new Error('Supabase client not initialized') };
+  }
+  
+  try {
+    return await supabase
+      .storage
+      .from('stl-files')
+      .upload(filePath, buffer, {
+        contentType: 'application/octet-stream',
+        cacheControl: '3600',
+        upsert: true
+      });
+  } catch (error) {
+    return { data: null, error };
+  }
+}
+
+// Helper function to get a signed URL from Supabase
+async function getSupabaseSignedUrl(filePath) {
+  if (!supabase) {
+    throw new Error('Supabase client not initialized');
+  }
+  
+  try {
+    const { data: signedUrlData, error: signedUrlError } = await supabase
+      .storage
+      .from('stl-files')
+      .createSignedUrl(filePath, 315360000); // 10 years in seconds
+    
+    if (signedUrlError) {
+      console.error('[' + new Date().toISOString() + '] Error creating signed URL:', signedUrlError.message);
+      
+      // Try to get a public URL as fallback
+      const { data: publicUrlData } = supabase
+        .storage
+        .from('stl-files')
+        .getPublicUrl(filePath);
+      
+      if (publicUrlData && publicUrlData.publicUrl) {
+        console.log('[' + new Date().toISOString() + '] Using public URL as fallback');
+        return publicUrlData.publicUrl;
+      }
+      
+      throw new Error('Could not generate URL for stored file: ' + signedUrlError.message);
+    }
+    
+    return signedUrlData.signedUrl;
+  } catch (error) {
+    console.error('[' + new Date().toISOString() + '] Error in getSupabaseSignedUrl:', error.message);
     throw error;
+  }
+}
+
+// Helper function to store file locally
+async function storeLocally(fileDir, filename, buffer, sanitizedFileName, isBinary) {
+  try {
+    // For local storage, create the file structure in a local-storage directory
+    const localDirPath = path.join(process.cwd(), 'local-storage', 'stl-files', fileDir);
+    
+    // Create directory if it doesn't exist
+    if (!fs.existsSync(localDirPath)) {
+      fs.mkdirSync(localDirPath, { recursive: true });
+    }
+    
+    // Save the file locally
+    const localFilePath = path.join(localDirPath, filename);
+    fs.writeFileSync(localFilePath, buffer);
+    
+    console.log('[' + new Date().toISOString() + '] Saved STL file locally to:', localFilePath);
+    
+    // Determine the base URL for local storage
+    const baseUrl = process.env.BASE_URL || 'http://localhost:4002';
+    const fileUrl = `${baseUrl}/local-storage/stl-files/${fileDir}/${filename}`;
+    
+    console.log('[' + new Date().toISOString() + '] Created local file URL:', fileUrl);
+    
+    return {
+      url: fileUrl,
+      path: `local-storage/${fileDir}/${filename}`,
+      fileName: sanitizedFileName,
+      storedAt: 'local',
+      fileSize: buffer.length,
+      isBinary
+    };
+  } catch (localError) {
+    console.error('[' + new Date().toISOString() + '] Error storing file locally:', localError.message);
+    throw new Error('Failed to store file locally: ' + localError.message);
   }
 }
 
@@ -1007,15 +873,16 @@ app.post('/api/checkout', async (req, res) => {
       priceCents = 1999; // Default to $19.99 if any error occurs
     }
     
-    // Store STL file FIRST, before creating checkout session, to ensure we have the download link
-    console.log('[' + new Date().toISOString() + '] Uploading STL file to Supabase...');
+    // STEP 1: Store STL file FIRST, before creating checkout session
+    console.log('[' + new Date().toISOString() + '] Uploading STL file to storage...');
     
     try {
+      // Upload the STL file
       stlFile = await storeSTLFile(stlBase64, stlFileName);
       console.log('[' + new Date().toISOString() + '] STL file stored successfully:', stlFile.path);
       console.log('[' + new Date().toISOString() + '] Download URL generated (first 100 chars):', stlFile.url.substring(0, 100) + '...');
       
-      // Save model data for use in creating the checkout session
+      // Save model data regardless of Stripe success
       modelData = {
         name: modelName,
         fileName: stlFileName,
@@ -1027,7 +894,9 @@ app.post('/api/checkout', async (req, res) => {
         stlUrl: stlFile.url
       };
       
-      // Store model data in Supabase
+      // STEP 2: Store model in database and get modelId
+      let modelId;
+      
       if (supabase) {
         try {
           // Prepare model info object
@@ -1045,7 +914,7 @@ app.post('/api/checkout', async (req, res) => {
             created_at: new Date().toISOString()
           };
           
-          console.log('[' + new Date().toISOString() + '] Attempting to save model info to Supabase:', JSON.stringify(modelInfo).substring(0, 200) + '...');
+          console.log('[' + new Date().toISOString() + '] Attempting to save model info to Supabase');
           
           // Save to models table in Supabase
           const { data, error } = await supabase
@@ -1056,263 +925,175 @@ app.post('/api/checkout', async (req, res) => {
           if (error) {
             console.error('[' + new Date().toISOString() + '] Error saving model to Supabase:', error.message);
             
-            // If the table doesn't exist, log a more helpful message and try to create it
-            if (error.message && error.message.includes('does not exist')) {
-              console.error('[' + new Date().toISOString() + '] The "models" table does not exist in Supabase. Using local storage only.');
-              
-              // Store model data in a local JSON file for development
-              if (process.env.NODE_ENV !== 'production') {
-                try {
-                  const localModelsDirPath = path.join(process.cwd(), 'local-storage', 'models');
-                  
-                  // Create the directory if it doesn't exist
-                  if (!fs.existsSync(localModelsDirPath)) {
-                    fs.mkdirSync(localModelsDirPath, { recursive: true });
-                  }
-                  
-                  // Generate a UUID for the model
-                  const modelId = require('crypto').randomUUID();
-                  modelInfo.id = modelId;
-                  
-                  // Save to a JSON file
-                  const localModelPath = path.join(localModelsDirPath, `${modelId}.json`);
-                  fs.writeFileSync(localModelPath, JSON.stringify(modelInfo, null, 2));
-                  
-                  console.log('[' + new Date().toISOString() + '] Saved model info to local storage with ID:', modelId);
-                  
-                  // Add the model ID to the data for the rest of the process
-                  modelData.modelId = modelId;
-                } catch (localStorageError) {
-                  console.error('[' + new Date().toISOString() + '] Error saving model to local storage:', localStorageError.message);
-                }
-              }
-            }
+            // Use local storage as fallback
+            modelId = saveFallbackModelData(modelInfo);
           } else if (!data || data.length === 0) {
             console.error('[' + new Date().toISOString() + '] No data returned from Supabase insert, but no error reported');
+            
+            // Use local storage as fallback
+            modelId = saveFallbackModelData(modelInfo);
           } else {
             console.log('[' + new Date().toISOString() + '] Saved model info with ID:', data[0]?.id);
-            
-            // Add the model ID to the data
-            if (data && data[0] && data[0].id) {
-              modelData.modelId = data[0].id;
-            }
+            modelId = data[0]?.id;
           }
         } catch (dbError) {
           console.error('[' + new Date().toISOString() + '] Error saving model to database:', dbError.message);
-          console.error('[' + new Date().toISOString() + '] Stack trace:', dbError.stack);
           
-          // Try local storage as fallback
-          if (process.env.NODE_ENV !== 'production') {
-            try {
-              const localModelsDirPath = path.join(process.cwd(), 'local-storage', 'models');
-              
-              // Create the directory if it doesn't exist
-              if (!fs.existsSync(localModelsDirPath)) {
-                fs.mkdirSync(localModelsDirPath, { recursive: true });
-              }
-              
-              // Generate a UUID for the model
-              const modelId = require('crypto').randomUUID();
-              const modelInfo = {
-                id: modelId,
-                model_name: modelName,
-                file_name: stlFileName,
-                dimensions,
-                material,
-                infill_percentage: infillPercentage,
-                price: priceCents,
-                email: email || 'not provided',
-                status: 'pending_payment',
-                stl_url: stlFile.url,
-                stl_path: stlFile.path,
-                created_at: new Date().toISOString()
-              };
-              
-              // Save to a JSON file
-              const localModelPath = path.join(localModelsDirPath, `${modelId}.json`);
-              fs.writeFileSync(localModelPath, JSON.stringify(modelInfo, null, 2));
-              
-              console.log('[' + new Date().toISOString() + '] Saved model info to local storage with ID:', modelId);
-              
-              // Add the model ID to the data for the rest of the process
-              modelData.modelId = modelId;
-            } catch (localStorageError) {
-              console.error('[' + new Date().toISOString() + '] Error saving model to local storage:', localStorageError.message);
-            }
-          }
+          // Use local storage as fallback
+          modelId = saveFallbackModelData({
+            model_name: modelName,
+            file_name: stlFileName,
+            dimensions,
+            material,
+            infill_percentage: infillPercentage,
+            price: priceCents,
+            email: email || 'not provided',
+            status: 'pending_payment',
+            stl_url: stlFile.url,
+            stl_path: stlFile.path,
+            created_at: new Date().toISOString()
+          });
         }
       } else {
-        console.warn('[' + new Date().toISOString() + '] Supabase client not initialized, skipping database storage');
+        console.warn('[' + new Date().toISOString() + '] Supabase client not initialized, using fallback storage');
         
-        // Fallback to local storage for development mode
-        if (process.env.NODE_ENV !== 'production') {
-          try {
-            const localModelsDirPath = path.join(process.cwd(), 'local-storage', 'models');
-            
-            // Create the directory if it doesn't exist
-            if (!fs.existsSync(localModelsDirPath)) {
-              fs.mkdirSync(localModelsDirPath, { recursive: true });
-            }
-            
-            // Generate a UUID for the model
-            const modelId = require('crypto').randomUUID();
-            const modelInfo = {
-              id: modelId,
-              model_name: modelName,
-              file_name: stlFileName,
-              dimensions,
-              material,
-              infill_percentage: infillPercentage,
-              price: priceCents,
-              email: email || 'not provided',
-              status: 'pending_payment',
-              stl_url: stlFile.url,
-              stl_path: stlFile.path,
-              created_at: new Date().toISOString()
-            };
-            
-            // Save to a JSON file
-            const localModelPath = path.join(localModelsDirPath, `${modelId}.json`);
-            fs.writeFileSync(localModelPath, JSON.stringify(modelInfo, null, 2));
-            
-            console.log('[' + new Date().toISOString() + '] Saved model info to local storage with ID:', modelId);
-            
-            // Add the model ID to the data for the rest of the process
-            modelData.modelId = modelId;
-          } catch (localStorageError) {
-            console.error('[' + new Date().toISOString() + '] Error saving model to local storage:', localStorageError.message);
-          }
-        }
+        // Use local storage as fallback
+        modelId = saveFallbackModelData({
+          model_name: modelName,
+          file_name: stlFileName,
+          dimensions,
+          material,
+          infill_percentage: infillPercentage,
+          price: priceCents,
+          email: email || 'not provided',
+          status: 'pending_payment',
+          stl_url: stlFile.url,
+          stl_path: stlFile.path,
+          created_at: new Date().toISOString()
+        });
       }
       
-      // Send email with download link immediately after successful upload
+      // Add the modelId to modelData
+      if (modelId) {
+        modelData.modelId = modelId;
+      }
+      
+      // STEP 3: Send email with download link immediately after successful upload
+      // This ensures the customer gets the link regardless of Stripe success
       if (email && stlFile && stlFile.url) {
         console.log('[' + new Date().toISOString() + '] Sending immediate download link email to:', email);
         
-        try {
-          await sendDownloadLinkEmail(
-            email,
-            modelName,
-            stlFile.url,
-            stlFileName,
-            dimensions,
-            material,
-            `${infillPercentage}%`,
-            'File Uploaded'
-          );
-          console.log('[' + new Date().toISOString() + '] Immediate download link email sent successfully');
-        } catch (emailError) {
-          console.error('[' + new Date().toISOString() + '] Error sending immediate download link email:', emailError.message);
-          // Continue even if email fails, this is not critical for checkout
-        }
-      } else if (!email) {
-        console.log('[' + new Date().toISOString() + '] No email provided, skipping immediate email notification');
+        await sendDownloadLinkEmail(
+          email, 
+          modelName, 
+          stlFile.url, 
+          stlFileName,
+          dimensions,
+          material,
+          `${infillPercentage}%`,
+          'File Uploaded'
+        );
+        
+        console.log('[' + new Date().toISOString() + '] Immediate download link email sent successfully');
       }
       
-    } catch (storageError) {
-      console.error('[' + new Date().toISOString() + '] Error storing STL file:', storageError.message);
-      return res.status(500).json({ 
-        success: false, 
-        error: 'Failed to store STL file: ' + storageError.message 
-      });
-    }
-    
-    // Create formatted item description
-    const modelDescription = formatModelDescription(modelName, dimensions, material, infillPercentage);
-    
-    // Create Stripe checkout session
-    console.log('[' + new Date().toISOString() + '] Creating Stripe checkout session with price in cents:', priceCents);
-    
-    try {
-      // Create metadata object with the STL file URL
-      const metadata = {
-        modelName: modelName.substring(0, 40),
-        stlFileName: stlFileName.substring(0, 40),
-        stlUrl: stlFile.url.substring(0, 500),  // Limit to 500 chars
-        dimensions: dimensions.substring(0, 40),
-        material: material.substring(0, 20),
-        infill: `${infillPercentage}%`,
-        customerEmail: email || 'not provided',
-        modelId: modelData.modelId || 'unknown',
-        orderType: '3d_print',
-        downloadLink: stlFile.url // Make sure this is explicitly included
-      };
-      
-      // Keep the total metadata under Stripe's limit (max 50KB)
-      const metadataSize = JSON.stringify(metadata).length;
-      if (metadataSize > 40000) { // Leave some buffer space
-        // Trim the URL if necessary to fit within limits
-        const excessBytes = metadataSize - 40000 + 100; // 100 bytes buffer
-        const newUrlLength = Math.max(100, metadata.stlUrl.length - excessBytes);
-        metadata.stlUrl = metadata.stlUrl.substring(0, newUrlLength) + '...';
-        console.log('[' + new Date().toISOString() + '] Trimmed URL to fit within Stripe metadata limits');
+      // Send notification to admin email
+      if (process.env.ADMIN_EMAIL) {
+        console.log('[' + new Date().toISOString() + '] Sending admin notification email');
+        
+        await sendAdminNotificationEmail(
+          modelName,
+          stlFile.url,
+          stlFileName,
+          dimensions,
+          material,
+          `${infillPercentage}%`,
+          priceCents,
+          email
+        );
       }
       
-      const productDescription = `3D Print of ${modelName}${dimensions ? `\nDimensions: ${dimensions}` : ''}
+      // STEP 4: Create Stripe checkout session
+      try {
+        // Prepare metadata for Stripe (keep it minimal to avoid size issues)
+        const metadata = {
+          modelId: modelData.modelId || '',
+          modelName,
+          fileName: stlFileName,
+          material,
+          infill: `${infillPercentage}%`,
+          email: email || ''
+        };
+        
+        // Don't include the full URL in metadata, it's too long
+        // Just include a shortened reference that we can use to look up the file
+        
+        const productDescription = `3D Print of ${modelName}${dimensions ? `\nDimensions: ${dimensions}` : ''}
 Material: ${material}
-Infill: ${infillPercentage}%
-Download your STL file: ${stlFile.url}`;
-      
-      const session = await stripe.checkout.sessions.create({
-        payment_method_types: ['card'],
-        line_items: [{
-          price_data: {
-            currency: 'usd',
-            product_data: {
-              name: `3D Print: ${modelName}`,
-              description: productDescription,
-              metadata: {
-                type: '3d_print',
-                stlDownloadUrl: stlFile.url
-              }
+Infill: ${infillPercentage}%`;
+        
+        console.log('[' + new Date().toISOString() + '] Creating Stripe checkout session with price in cents:', priceCents);
+        
+        const session = await stripe.checkout.sessions.create({
+          payment_method_types: ['card'],
+          line_items: [{
+            price_data: {
+              currency: 'usd',
+              product_data: {
+                name: `3D Print: ${modelName}`,
+                description: productDescription,
+                metadata: {
+                  type: '3d_print',
+                  modelId: modelData.modelId || ''
+                }
+              },
+              unit_amount: priceCents,
             },
-            unit_amount: priceCents, // Now using properly formatted price in cents
-          },
-          quantity: 1,
-        }],
-        mode: 'payment',
-        // Simplify to a basic thank you page with no parameters
-        success_url: `${process.env.CLIENT_URL || 'http://localhost:3000'}/thank-you`,
-        cancel_url: `${process.env.CLIENT_URL || 'http://localhost:3000'}/checkout/cancel`,
-        metadata: metadata
-      });
-      
-      checkoutSession = session;
-      console.log('[' + new Date().toISOString() + '] Stripe checkout session created successfully. Session ID:', session.id);
-      
-      // Send the response with both session ID, URL, and STL file information
-      res.status(200).json({
-        success: true,
-        id: session.id,
-        url: session.url,
-        stlInfo: {
-          url: stlFile.url,
-          fileName: stlFile.fileName,
-          downloadUrl: stlFile.url,
-          modelId: modelData.modelId || ''
-        }
-      });
-    } catch (stripeError) {
-      console.error('[' + new Date().toISOString() + '] Error creating checkout session:', stripeError.message);
-      
-      // Even if Stripe fails, we can return the download link
-      if (stlFile && stlFile.url) {
-        res.status(200).json({ 
+            quantity: 1,
+          }],
+          mode: 'payment',
+          success_url: `${process.env.CLIENT_URL || 'http://localhost:3000'}/thank-you`,
+          cancel_url: `${process.env.CLIENT_URL || 'http://localhost:3000'}/checkout/cancel`,
+          metadata: metadata
+        });
+        
+        checkoutSession = session;
+        console.log('[' + new Date().toISOString() + '] Stripe checkout session created successfully. Session ID:', session.id);
+        
+        // Send successful response with both Stripe session and STL info
+        res.status(200).json({
           success: true,
-          error: 'Failed to create checkout session, but STL file was stored successfully.',
+          id: session.id,
+          url: session.url,
           stlInfo: {
             url: stlFile.url,
             fileName: stlFile.fileName,
             downloadUrl: stlFile.url,
-            modelId: modelData?.modelId || ''
+            modelId: modelData.modelId || ''
           }
         });
-      } else {
-        res.status(500).json({ 
-          success: false, 
-          error: 'Failed to create checkout session: ' + stripeError.message 
+      } catch (stripeError) {
+        console.error('[' + new Date().toISOString() + '] Error creating checkout session:', stripeError.message);
+        
+        // Even if Stripe fails, we can return the download link
+        // The customer already has the email with the download link
+        res.status(200).json({ 
+          success: true,
+          error: 'Failed to create checkout session, but STL file was stored successfully and emailed to you.',
+          stlInfo: {
+            url: stlFile.url,
+            fileName: stlFile.fileName,
+            downloadUrl: stlFile.url,
+            modelId: modelData.modelId || ''
+          }
         });
       }
+    } catch (uploadError) {
+      console.error('[' + new Date().toISOString() + '] Error storing STL file:', uploadError.message);
+      res.status(500).json({ 
+        success: false, 
+        error: 'Failed to upload STL file: ' + uploadError.message 
+      });
     }
   } catch (error) {
     console.error('[' + new Date().toISOString() + '] Unexpected error in checkout endpoint:', error.message);
@@ -1337,6 +1118,41 @@ Download your STL file: ${stlFile.url}`;
     }
   }
 });
+
+// Helper function to save model data to local storage as fallback
+function saveFallbackModelData(modelInfo) {
+  if (process.env.NODE_ENV === 'production') {
+    console.warn('[' + new Date().toISOString() + '] No fallback storage available in production');
+    return null;
+  }
+  
+  try {
+    const localModelsDirPath = path.join(process.cwd(), 'local-storage', 'models');
+    
+    // Create the directory if it doesn't exist
+    if (!fs.existsSync(localModelsDirPath)) {
+      fs.mkdirSync(localModelsDirPath, { recursive: true });
+    }
+    
+    // Generate a UUID for the model
+    const modelId = require('crypto').randomUUID();
+    const fullModelInfo = {
+      ...modelInfo,
+      id: modelId
+    };
+    
+    // Save to a JSON file
+    const localModelPath = path.join(localModelsDirPath, `${modelId}.json`);
+    fs.writeFileSync(localModelPath, JSON.stringify(fullModelInfo, null, 2));
+    
+    console.log('[' + new Date().toISOString() + '] Saved model info to local storage with ID:', modelId);
+    
+    return modelId;
+  } catch (localStorageError) {
+    console.error('[' + new Date().toISOString() + '] Error saving model to local storage:', localStorageError.message);
+    return null;
+  }
+}
 
 // Create a new endpoint to get download link for a model
 app.get('/api/model/:modelId', async (req, res) => {
@@ -1497,6 +1313,117 @@ async function sendDownloadLinkEmail(email, modelName, downloadUrl, fileName, di
   }
 }
 
+// Add a helper function to send admin notification for orders
+async function sendAdminNotificationEmail(modelName, downloadUrl, fileName, dimensions, material, infill, price, customerEmail, orderTime = new Date()) {
+  if (!process.env.ADMIN_EMAIL) {
+    console.log('[' + new Date().toISOString() + '] No admin email configured for notifications');
+    return false;
+  }
+  
+  console.log('[' + new Date().toISOString() + '] Preparing to send admin notification email to:', process.env.ADMIN_EMAIL);
+  
+  try {
+    // Use the global transporter if available, otherwise create a new one
+    let emailTransporter = transporter;
+    
+    if (!emailTransporter) {
+      // Try to create a new transporter as fallback
+      const emailUser = process.env.EMAIL_USER;
+      const emailPass = process.env.EMAIL_PASS || process.env.EMAIL_PASSWORD;
+      
+      if (!emailUser || !emailPass) {
+        console.error('[' + new Date().toISOString() + '] Cannot send email: missing email credentials');
+        return false;
+      }
+      
+      emailTransporter = nodemailer.createTransport({
+        service: 'gmail',
+        auth: {
+          user: emailUser,
+          pass: emailPass
+        }
+      });
+    }
+    
+    // Format the email body
+    const emailBody = `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 5px;">
+        <h2 style="color: #4a5568; margin-bottom: 20px;">🚨 New STL File Order Received</h2>
+        
+        <p>A new 3D printing order has been received. Here are the details:</p>
+        
+        <div style="margin: 20px 0; padding: 15px; background-color: #f7fafc; border-radius: 5px;">
+          <h3 style="color: #4a5568; margin-top: 0;">Order Details:</h3>
+          <table style="width: 100%; border-collapse: collapse;">
+            <tr>
+              <td style="padding: 8px 0; border-bottom: 1px solid #e0e0e0; width: 40%;"><strong>Customer Email:</strong></td>
+              <td style="padding: 8px 0; border-bottom: 1px solid #e0e0e0;">${customerEmail || 'Not provided'}</td>
+            </tr>
+            <tr>
+              <td style="padding: 8px 0; border-bottom: 1px solid #e0e0e0;"><strong>Order Time:</strong></td>
+              <td style="padding: 8px 0; border-bottom: 1px solid #e0e0e0;">${orderTime.toISOString()}</td>
+            </tr>
+            <tr>
+              <td style="padding: 8px 0; border-bottom: 1px solid #e0e0e0;"><strong>Model Name:</strong></td>
+              <td style="padding: 8px 0; border-bottom: 1px solid #e0e0e0;">${modelName}</td>
+            </tr>
+            <tr>
+              <td style="padding: 8px 0; border-bottom: 1px solid #e0e0e0;"><strong>File Name:</strong></td>
+              <td style="padding: 8px 0; border-bottom: 1px solid #e0e0e0;">${fileName}</td>
+            </tr>
+            ${dimensions ? `
+            <tr>
+              <td style="padding: 8px 0; border-bottom: 1px solid #e0e0e0;"><strong>Dimensions:</strong></td>
+              <td style="padding: 8px 0; border-bottom: 1px solid #e0e0e0;">${dimensions}</td>
+            </tr>` : ''}
+            <tr>
+              <td style="padding: 8px 0; border-bottom: 1px solid #e0e0e0;"><strong>Material:</strong></td>
+              <td style="padding: 8px 0; border-bottom: 1px solid #e0e0e0;">${material}</td>
+            </tr>
+            <tr>
+              <td style="padding: 8px 0; border-bottom: 1px solid #e0e0e0;"><strong>Infill:</strong></td>
+              <td style="padding: 8px 0; border-bottom: 1px solid #e0e0e0;">${infill}</td>
+            </tr>
+            <tr>
+              <td style="padding: 8px 0; border-bottom: 1px solid #e0e0e0;"><strong>Price:</strong></td>
+              <td style="padding: 8px 0; border-bottom: 1px solid #e0e0e0;">$${(parseInt(price)/100).toFixed(2)}</td>
+            </tr>
+          </table>
+        </div>
+        
+        <div style="margin: 25px 0; text-align: center;">
+          <a href="${downloadUrl}" style="background-color: #4a5568; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; font-weight: bold; display: inline-block;">Download Customer's STL File</a>
+        </div>
+        
+        <div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #e0e0e0; font-size: 0.9em; color: #718096;">
+          <p>This is an automated notification from your Taiyaki 3D Printing service.</p>
+        </div>
+      </div>
+    `;
+    
+    // Get admin email - either from env or use the BCC email as fallback
+    const adminEmail = process.env.ADMIN_EMAIL || process.env.BCC_EMAIL || 'taiyaki.orders@gmail.com';
+    
+    // Set up email options
+    const mailOptions = {
+      from: process.env.EMAIL_USER,
+      to: adminEmail,
+      subject: `🚨 New 3D Print Order: ${modelName} from ${customerEmail || 'Guest'}`,
+      html: emailBody
+    };
+    
+    // Send the email
+    console.log('[' + new Date().toISOString() + '] Sending admin notification email...');
+    const info = await emailTransporter.sendMail(mailOptions);
+    console.log('[' + new Date().toISOString() + '] Admin notification email sent:', info.response);
+    
+    return true;
+  } catch (error) {
+    console.error('[' + new Date().toISOString() + '] Error sending admin notification email:', error.message);
+    return false;
+  }
+}
+
 // Add a debugging endpoint for environment variables (safe version)
 app.get('/api/debug-environment', (req, res) => {
   const envSummary = {
@@ -1562,6 +1489,6 @@ app.get('/api/checkout/session/:sessionId', async (req, res) => {
 });
 
 // Start the server
-app.listen(PORT, () => {
+app.listen(PORT, '0.0.0.0', () => {
   console.log(`[${new Date().toISOString()}] Stripe checkout server is running on port ${PORT}`);
 });
