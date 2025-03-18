@@ -316,6 +316,211 @@ const localStoragePath = path.join(process.cwd(), 'local-storage');
 app.use('/local-storage', express.static(localStoragePath));
 console.log(`[${new Date().toISOString()}] Local file storage route enabled at /local-storage for path: ${localStoragePath}`);
 
+// Route for uploading files to Supabase
+app.post('/api/upload-to-supabase', async (req, res) => {
+  console.log(`[${new Date().toISOString()}] Handling /api/upload-to-supabase request`);
+  
+  try {
+    // Validate request
+    if (!req.body || !req.body.fileName || !req.body.fileData) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required fields: fileName and fileData are required'
+      });
+    }
+    
+    // Extract information from request
+    const { fileName, fileData, fileType = 'application/octet-stream' } = req.body;
+    
+    // Sanitize the file name
+    const safeFileName = fileName.replace(/[^a-zA-Z0-9_\-\.]/g, '_');
+    
+    // Convert base64 data to buffer
+    const fileBuffer = Buffer.from(fileData, 'base64');
+    
+    console.log(`[${new Date().toISOString()}] Processing file: ${safeFileName}, size: ${fileBuffer.length} bytes`);
+    
+    // Generate a unique storage path with date-based organization
+    const timestamp = Date.now();
+    const uniqueId = crypto.randomBytes(8).toString('hex');
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    
+    const storagePath = `${year}/${month}/${day}/${timestamp}-${uniqueId}-${safeFileName}`;
+    console.log(`[${new Date().toISOString()}] Supabase Storage path: ${storagePath}`);
+    
+    // Ensure bucket exists
+    try {
+      if (supabase) {
+        const { data: buckets } = await supabase.storage.listBuckets();
+        const bucketExists = buckets.some(bucket => bucket.name === 'stl-files');
+        
+        if (!bucketExists) {
+          console.log(`[${new Date().toISOString()}] Creating bucket: stl-files`);
+          await supabase.storage.createBucket('stl-files', {
+            public: false,
+            fileSizeLimit: 52428800, // 50MB limit
+          });
+        }
+      }
+    } catch (bucketError) {
+      console.error(`[${new Date().toISOString()}] Bucket check/create error:`, bucketError);
+      // Continue anyway, the bucket might exist
+    }
+    
+    // Upload file to Supabase Storage using the existing uploadToSupabase function
+    if (supabase) {
+      console.log(`[${new Date().toISOString()}] Uploading to Supabase...`);
+      const { data, error } = await uploadToSupabase(storagePath, fileBuffer);
+      
+      if (error) {
+        console.error(`[${new Date().toISOString()}] Supabase upload error:`, error);
+        throw new Error(`Supabase upload failed: ${error.message}`);
+      }
+      
+      console.log(`[${new Date().toISOString()}] File uploaded successfully to Supabase`);
+      
+      // Create a signed URL with long expiry
+      const { data: signedUrlData, error: signedUrlError } = await getSupabaseSignedUrl(storagePath);
+      
+      if (signedUrlError) {
+        console.error(`[${new Date().toISOString()}] Signed URL error:`, signedUrlError);
+        // Continue anyway, we'll use the public URL as fallback
+      }
+      
+      // Get public URL as backup
+      const { data: publicUrlData } = supabase.storage
+        .from('stl-files')
+        .getPublicUrl(storagePath);
+      
+      // Return success response with URLs and path
+      return res.status(200).json({
+        success: true,
+        url: signedUrlData?.signedUrl || publicUrlData?.publicUrl || null,
+        publicUrl: publicUrlData?.publicUrl || null,
+        path: storagePath,
+        fileName: safeFileName,
+        fileSize: fileBuffer.length
+      });
+    } else {
+      // If Supabase is not available, upload to local storage as fallback
+      const localFilePath = path.join(localStoragePath, safeFileName);
+      fs.writeFileSync(localFilePath, fileBuffer);
+      
+      const localUrl = `/local-storage/${safeFileName}`;
+      return res.status(200).json({
+        success: true,
+        url: localUrl,
+        publicUrl: localUrl,
+        path: localUrl,
+        fileName: safeFileName,
+        fileSize: fileBuffer.length,
+        note: "Using local storage (Supabase unavailable)"
+      });
+    }
+  } catch (error) {
+    console.error(`[${new Date().toISOString()}] Upload error:`, error);
+    return res.status(500).json({
+      success: false,
+      error: error.message || 'File upload failed'
+    });
+  }
+});
+
+// Route for Stripe checkout (without file upload)
+app.post('/api/stripe-checkout', async (req, res) => {
+  console.log(`[${new Date().toISOString()}] Stripe checkout request received`);
+  
+  try {
+    // Validate request
+    if (!req.body || !req.body.finalPrice) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required fields: finalPrice is required'
+      });
+    }
+    
+    // Extract information from request
+    const {
+      modelName = 'Custom 3D Print',
+      color = 'Default',
+      quantity = 1,
+      finalPrice,
+      material = 'PLA',
+      infillPercentage = 20
+    } = req.body;
+    
+    console.log(`[${new Date().toISOString()}] Processing checkout for ${modelName}, price: $${finalPrice}, color: ${color}, material: ${material}`);
+    
+    // Convert price to cents if it's not already
+    const priceCents = Math.round(parseFloat(finalPrice) * 100);
+    
+    // Create a product first, then create a price for it
+    const product = await stripe.products.create({
+      name: `3D Print: ${modelName}`,
+      description: `Color: ${color}, Material: ${material}, Quantity: ${quantity}, Infill: ${infillPercentage}%`,
+    });
+    
+    console.log(`[${new Date().toISOString()}] Stripe product created: ${product.id}`);
+    
+    // Create a price for this product
+    const price = await stripe.prices.create({
+      currency: 'usd',
+      unit_amount: priceCents,
+      product: product.id,
+    });
+    
+    console.log(`[${new Date().toISOString()}] Stripe price created: ${price.id}`);
+    
+    // Determine the host for redirect URLs
+    const host = req.headers.origin || 'http://localhost:3000';
+    
+    // Create the Stripe checkout session
+    const session = await stripe.checkout.sessions.create({
+      payment_method_types: ['card'],
+      line_items: [
+        {
+          price: price.id,
+          quantity: 1, // We already factored quantity into the price
+        },
+      ],
+      mode: 'payment',
+      success_url: `${host}/checkout-confirmation?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${host}/`,
+      metadata: {
+        modelName,
+        color,
+        quantity: quantity.toString(),
+        finalPrice: finalPrice.toString(),
+        material,
+        infillPercentage: infillPercentage.toString(),
+        orderType: '3d_print'
+      },
+      billing_address_collection: 'required',
+      shipping_address_collection: {
+        allowed_countries: ['US', 'CA', 'GB', 'AU'],
+      },
+    });
+    
+    console.log(`[${new Date().toISOString()}] Stripe session created: ${session.id}`);
+    
+    // Return the checkout URL
+    return res.status(200).json({
+      success: true,
+      url: session.url,
+      sessionId: session.id
+    });
+  } catch (error) {
+    console.error(`[${new Date().toISOString()}] Stripe checkout error:`, error);
+    return res.status(500).json({
+      success: false,
+      error: error.message || 'Checkout failed'
+    });
+  }
+});
+
 // In production, create the local-storage directory if it doesn't exist
 if (process.env.NODE_ENV === 'production') {
   // Ensure local-storage directories exist for fallback
@@ -702,36 +907,41 @@ async function uploadToSupabase(filePath, buffer) {
 // Helper function to get a signed URL from Supabase
 async function getSupabaseSignedUrl(filePath) {
   if (!supabase) {
-    throw new Error('Supabase client not initialized');
+    console.log('[' + new Date().toISOString() + '] getSupabaseSignedUrl: Supabase client not initialized');
+    return { data: { signedUrl: null }, error: new Error('Supabase client not initialized') };
   }
-  
+
   try {
-    const { data: signedUrlData, error: signedUrlError } = await supabase
-      .storage
-      .from('stl-files')
-      .createSignedUrl(filePath, 315360000); // 10 years in seconds
+    console.log('[' + new Date().toISOString() + '] Getting signed URL for:', filePath);
     
-    if (signedUrlError) {
-      console.error('[' + new Date().toISOString() + '] Error creating signed URL:', signedUrlError.message);
-      
-      // Try to get a public URL as fallback
-      const { data: publicUrlData } = supabase
-        .storage
+    // Generate a signed URL with a long expiry (7 days)
+    const { data, error } = await supabase.storage
+      .from('stl-files')
+      .createSignedUrl(filePath, 604800); // 7 days in seconds
+    
+    if (error) {
+      console.error('[' + new Date().toISOString() + '] Error creating signed URL:', error.message);
+      return { data: { signedUrl: null }, error };
+    }
+    
+    if (!data || !data.signedUrl) {
+      console.warn('[' + new Date().toISOString() + '] No signed URL returned from Supabase');
+      // Return a fallback with public URL instead
+      const { data: publicUrlData } = supabase.storage
         .from('stl-files')
         .getPublicUrl(filePath);
       
-      if (publicUrlData && publicUrlData.publicUrl) {
-        console.log('[' + new Date().toISOString() + '] Using public URL as fallback');
-        return publicUrlData.publicUrl;
-      }
-      
-      throw new Error('Could not generate URL for stored file: ' + signedUrlError.message);
+      return { 
+        data: { signedUrl: publicUrlData?.publicUrl || null },
+        error: null
+      };
     }
     
-    return signedUrlData.signedUrl;
+    console.log('[' + new Date().toISOString() + '] Signed URL created successfully');
+    return { data, error: null };
   } catch (error) {
-    console.error('[' + new Date().toISOString() + '] Error in getSupabaseSignedUrl:', error.message);
-    throw error;
+    console.error('[' + new Date().toISOString() + '] Exception in getSupabaseSignedUrl:', error.message);
+    return { data: { signedUrl: null }, error };
   }
 }
 
