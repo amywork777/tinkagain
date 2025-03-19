@@ -1605,7 +1605,7 @@ const Print3DTab = () => {
     }
   };
 
-  // Legacy function to upload file to Supabase via serverless API
+  // Function to upload file to Supabase via serverless API
   const uploadFileToSupabase = async (fileData: string, fileName: string) => {
     console.log(`[${new Date().toISOString()}] SUPABASE UPLOAD: Uploading file to Supabase: ${fileName}`);
     
@@ -1619,25 +1619,49 @@ const Print3DTab = () => {
       const decodedSize = Math.ceil((base64Data.length * 3) / 4);
       console.log(`[${new Date().toISOString()}] Estimated file size: ${Math.round(decodedSize / 1024)}KB`);
       
+      // Add checksum to verify data integrity for large files
+      let fileChecksum = '';
+      if (decodedSize > 4 * 1024 * 1024) {
+        fileChecksum = await generateChecksum(base64Data);
+        console.log(`[${new Date().toISOString()}] File checksum: ${fileChecksum.slice(0, 8)}...`);
+      }
+      
       // Generate a unique filename with timestamp to avoid conflicts
       const timestamp = Date.now();
       const uniqueFileName = `${timestamp}-${fileName}`;
       
-      // For large files, use direct upload to Supabase instead of going through Vercel
-      if (decodedSize > 4 * 1024 * 1024) {
-        console.log(`[${new Date().toISOString()}] File is > 4MB, using direct Supabase upload`);
-        return await uploadDirectToSupabase(fileData, fileName);
-      }
-      
-      // For smaller files, we can still use the server API route
+      // Show upload toast
       toast({
         title: "Uploading model...",
-        description: "Uploading model to server",
-        duration: 3000,
+        description: decodedSize > 4 * 1024 * 1024 ? 
+          `Large model (${Math.round(decodedSize / (1024 * 1024))}MB). Using chunked upload.` : 
+          "Uploading model to server",
+        duration: 5000,
       });
       
-      // Upload using standard API endpoint
-      const uploadResult = await uploadStandardFile(base64Data, uniqueFileName, true);
+      let uploadResult;
+      
+      // DIFFERENT STRATEGIES BASED ON FILE SIZE
+      if (decodedSize > 4 * 1024 * 1024) {
+        // For files larger than 4MB, use chunked upload to work around Vercel limits
+        console.log(`[${new Date().toISOString()}] Using chunked upload for large file`);
+        
+        try {
+          // Always use chunked upload for large files
+          console.log(`[${new Date().toISOString()}] Starting chunked upload...`);
+          uploadResult = await uploadLargeFileInChunks(base64Data, uniqueFileName, fileChecksum);
+        } catch (chunkError) {
+          console.error(`[${new Date().toISOString()}] Chunked upload failed:`, chunkError);
+          console.log(`[${new Date().toISOString()}] Falling back to direct upload`);
+          
+          // If chunked upload fails, fall back to direct upload
+          uploadResult = await uploadDirectToSupabase(fileData, fileName);
+        }
+      } else {
+        // For smaller files, use standard upload
+        console.log(`[${new Date().toISOString()}] Using standard upload for small file`);
+        uploadResult = await uploadStandardFile(base64Data, uniqueFileName, true);
+      }
       
       console.log(`[${new Date().toISOString()}] SUPABASE UPLOAD SUCCESS:`, uploadResult);
       
@@ -1652,7 +1676,7 @@ const Print3DTab = () => {
       console.error(`[${new Date().toISOString()}] SUPABASE UPLOAD ERROR:`, error);
       
       // For any errors, fall back to direct upload
-      console.log(`[${new Date().toISOString()}] API upload failed, falling back to direct upload`);
+      console.log(`[${new Date().toISOString()}] All upload methods failed, trying direct upload as last resort`);
       
       try {
         return await uploadDirectToSupabase(fileData, fileName);
