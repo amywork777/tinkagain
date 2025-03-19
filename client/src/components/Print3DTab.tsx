@@ -12,7 +12,9 @@ import {
   Printer,
   Loader2,
   AlertCircle,
-  X
+  X,
+  Upload,
+  CheckCircle
 } from "lucide-react";
 import {
   calculatePrice,
@@ -24,6 +26,9 @@ import { FormControl, FormLabel, FormHelperText, FormItem, SimpleForm } from "@/
 import { loadStripe } from '@stripe/stripe-js';
 import { STLExporter } from 'three/examples/jsm/exporters/STLExporter';
 import { Object3D } from 'three';
+import { createClient } from '@supabase/supabase-js';
+import { v4 as uuidv4 } from 'uuid';
+import { Progress } from "@/components/ui/progress";
 
 // Initialize with empty array, will be populated from API
 const EMPTY_FILAMENT_COLORS: FilamentColor[] = [];
@@ -63,6 +68,22 @@ interface UploadedModelData {
   fileType: string;
   uploadTime: string;
 }
+
+// Constants for Supabase
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || 'https://jwftsutqrfcnxwxshwbf.supabase.co';
+const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imp3ZnRzdXRxcmZjbnh3eHNod2JmIiwicm9sZSI6ImFub24iLCJpYXQiOjE2OTM2NTMxMjEsImV4cCI6MjAwOTIyOTEyMX0.J9OLZW8-h0DY-_vWuKU94-JErA_Y510X2RNYVbSa5m0';
+const STL_FILES_BUCKET = 'stl-files';
+
+// Initialize Supabase client
+const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+  auth: {
+    persistSession: false,
+    autoRefreshToken: false
+  }
+});
+
+// Log Supabase initialization for debugging
+console.log(`[${new Date().toISOString()}] Supabase client initialized`);
 
 // Load Stripe outside of a component's render to avoid recreating the Stripe object on every render
 const stripePromise = import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY
@@ -107,6 +128,11 @@ const Print3DTab = () => {
   const [uploadedModelData, setUploadedModelData] = useState<UploadedModelData | string | null>(null);
   const [connectionAttempts, setConnectionAttempts] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
+  
+  // New state variables for direct upload
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [isUploading, setIsUploading] = useState(false);
+  const [directUploadResult, setDirectUploadResult] = useState<any>(null);
 
   // Fetch filaments when component mounts
   useEffect(() => {
@@ -675,7 +701,7 @@ const Print3DTab = () => {
     }
   };
 
-  // Handle file upload function
+  // Handle file upload function with direct upload for large files
   const handleUploadModel = async () => {
     try {
       // Create a file input element
@@ -691,30 +717,93 @@ const Print3DTab = () => {
 
           // Store the original filename
           const originalFileName = file.name;
-
-          // Convert file to base64 for model preview and API use
-          const reader = new FileReader();
-          reader.onload = async (event) => {
-            if (event.target && event.target.result) {
-              // Store both the file data and metadata
+          
+          // Check file size
+          const fileSizeMB = file.size / (1024 * 1024);
+          console.log(`[${new Date().toISOString()}] Selected file: ${originalFileName} (${fileSizeMB.toFixed(2)}MB)`);
+          
+          try {
+            // For larger files, upload directly to Supabase
+            if (file.size > 4 * 1024 * 1024) { // 4MB threshold
+              console.log(`[${new Date().toISOString()}] Large file detected (${fileSizeMB.toFixed(2)}MB), using direct upload`);
+              
+              // First notify that we're reading the file
+              toast({
+                title: "Processing file...",
+                description: `Preparing ${originalFileName} (${Math.round(fileSizeMB)}MB) for upload`,
+                duration: 3000,
+              });
+              
+              // Start a direct upload with the file object
+              const uploadResult = await uploadDirectToSupabase(file, originalFileName);
+              
+              // Store the result in uploaded model data
               setUploadedModelData({
-                data: event.target.result,
+                data: null, // We don't need to store the full data in memory anymore
                 fileName: originalFileName,
                 fileSize: file.size,
                 fileType: file.type,
                 uploadTime: new Date().toISOString()
               });
-
-              toast({
-                title: "Model uploaded successfully",
-                description: `${originalFileName} (${Math.round(file.size / 1024)}KB)`,
-              });
-
+              
               // Calculate price for the uploaded model
               await calculatePriceFromAPI();
+            } else {
+              // For smaller files, we can still use the regular flow with data URLs
+              console.log(`[${new Date().toISOString()}] Standard file size (${fileSizeMB.toFixed(2)}MB), using regular upload`);
+              
+              // Convert file to base64 for model preview and API use
+              const reader = new FileReader();
+              reader.onload = async (event) => {
+                if (event.target && event.target.result) {
+                  // Store both the file data and metadata
+                  setUploadedModelData({
+                    data: event.target.result,
+                    fileName: originalFileName,
+                    fileSize: file.size,
+                    fileType: file.type,
+                    uploadTime: new Date().toISOString()
+                  });
+
+                  toast({
+                    title: "Model loaded",
+                    description: `${originalFileName} (${Math.round(file.size / 1024)}KB)`,
+                  });
+
+                  // Calculate price for the uploaded model
+                  await calculatePriceFromAPI();
+                }
+              };
+              reader.readAsDataURL(file);
             }
-          };
-          reader.readAsDataURL(file);
+          } catch (uploadError) {
+            console.error(`[${new Date().toISOString()}] Error in upload process:`, uploadError);
+            
+            // Even if upload fails, still load the model for pricing
+            const reader = new FileReader();
+            reader.onload = async (event) => {
+              if (event.target && event.target.result) {
+                // Store model metadata and minimal data reference
+                setUploadedModelData({
+                  data: event.target.result,
+                  fileName: originalFileName,
+                  fileSize: file.size,
+                  fileType: file.type,
+                  uploadTime: new Date().toISOString()
+                });
+                
+                // Calculate price
+                await calculatePriceFromAPI();
+              }
+            };
+            reader.readAsDataURL(file);
+            
+            toast({
+              title: "Upload issue",
+              description: "File loaded for preview, but storage upload had issues. You can still proceed with checkout.",
+              variant: "default",
+            });
+          }
         }
       };
 
@@ -859,6 +948,17 @@ const Print3DTab = () => {
             : "uploaded_model.stl";
           
           checkoutData.modelName = stlFileName.replace(/\.[^/.]+$/, ""); // Remove file extension
+          
+          // If we already have a direct upload result, use it to skip the upload step
+          if (directUploadResult?.success && directUploadResult?.direct) {
+            console.log(`[${new Date().toISOString()}] Using existing direct upload result:`, directUploadResult);
+            checkoutData.filePath = directUploadResult.path;
+            checkoutData.fileUrl = directUploadResult.url;
+            
+            // Skip the upload step and go straight to checkout
+            await initiateStripeCheckout(checkoutData);
+            return;
+          }
           
           // Extract the file data from uploadedModelData
           console.log(`[${new Date().toISOString()}] Processing uploadedModelData type: ${typeof uploadedModelData}`);
@@ -1157,6 +1257,17 @@ const Print3DTab = () => {
         stlFileName = `${model.name.toLowerCase().replace(/\s+/g, '_')}.stl`;
         
         checkoutData.modelName = modelName;
+        
+        // If we already have a direct upload result, use it to skip the upload step
+        if (directUploadResult?.success && directUploadResult?.direct) {
+          console.log(`[${new Date().toISOString()}] Using existing direct upload result:`, directUploadResult);
+          checkoutData.filePath = directUploadResult.path;
+          checkoutData.fileUrl = directUploadResult.url;
+          
+          // Skip the STL export and upload, go straight to checkout
+          await initiateStripeCheckout(checkoutData);
+          return;
+        }
 
         try {
           // Export the model to STL
@@ -1326,7 +1437,175 @@ const Print3DTab = () => {
     return hashHex;
   };
   
-  // Function to upload file to Supabase with chunking for large files
+  // Direct upload to Supabase function - bypasses Vercel completely
+  const uploadDirectToSupabase = async (fileData: string | ArrayBuffer | File | Blob, fileName: string) => {
+    console.log(`[${new Date().toISOString()}] DIRECT SUPABASE UPLOAD: Starting direct upload for ${fileName}`);
+    
+    try {
+      setIsUploading(true);
+      setUploadProgress(0);
+      
+      // Generate a unique path with date-based organization
+      const now = new Date();
+      const year = now.getFullYear();
+      const month = String(now.getMonth() + 1).padStart(2, '0');
+      const day = String(now.getDate()).padStart(2, '0');
+      const timestamp = Date.now();
+      const uniqueId = uuidv4().split('-')[0]; // Use part of UUID for shorter ID
+      
+      const storagePath = `${year}/${month}/${day}/${timestamp}-${uniqueId}-${fileName}`;
+      console.log(`[${new Date().toISOString()}] Storage path: ${storagePath}`);
+      
+      // Ensure the bucket exists (this is a common issue)
+      try {
+        const { data: buckets } = await supabase.storage.listBuckets();
+        const bucketExists = buckets?.some(bucket => bucket.name === STL_FILES_BUCKET);
+        
+        if (!bucketExists) {
+          console.log(`[${new Date().toISOString()}] Creating bucket: ${STL_FILES_BUCKET}`);
+          await supabase.storage.createBucket(STL_FILES_BUCKET, {
+            public: false,
+            fileSizeLimit: 100 * 1024 * 1024, // 100MB limit
+          });
+        }
+      } catch (error) {
+        console.warn(`[${new Date().toISOString()}] Bucket check error (might exist already):`, error);
+      }
+      
+      // Convert data to the right format if needed
+      let fileBlob: Blob;
+      
+      if (fileData instanceof File || fileData instanceof Blob) {
+        fileBlob = fileData;
+      } else if (fileData instanceof ArrayBuffer) {
+        fileBlob = new Blob([fileData], { type: 'application/octet-stream' });
+      } else if (typeof fileData === 'string') {
+        // Handle base64 data
+        if (fileData.includes('base64,')) {
+          const base64Data = fileData.split('base64,')[1];
+          const binaryString = atob(base64Data);
+          const bytes = new Uint8Array(binaryString.length);
+          for (let i = 0; i < binaryString.length; i++) {
+            bytes[i] = binaryString.charCodeAt(i);
+          }
+          fileBlob = new Blob([bytes], { type: 'application/octet-stream' });
+        } else {
+          // Assume it's already base64
+          const binaryString = atob(fileData);
+          const bytes = new Uint8Array(binaryString.length);
+          for (let i = 0; i < binaryString.length; i++) {
+            bytes[i] = binaryString.charCodeAt(i);
+          }
+          fileBlob = new Blob([bytes], { type: 'application/octet-stream' });
+        }
+      } else {
+        throw new Error('Unsupported file data format');
+      }
+      
+      // Create a toast for upload progress
+      toast({
+        title: "Direct upload started",
+        description: `Uploading ${fileName} (${Math.round(fileBlob.size / (1024 * 1024))}MB)`,
+        duration: 5000,
+      });
+      
+      // Upload the file with progress tracking
+      const { data, error } = await supabase.storage
+        .from(STL_FILES_BUCKET)
+        .upload(storagePath, fileBlob, {
+          contentType: 'application/octet-stream',
+          cacheControl: '3600',
+          upsert: true,
+          onUploadProgress: (progress) => {
+            const percentage = Math.round((progress.loaded / progress.total) * 100);
+            console.log(`[${new Date().toISOString()}] Upload progress: ${percentage}%`);
+            setUploadProgress(percentage);
+            
+            // Update toast at certain intervals
+            if (percentage % 25 === 0 || percentage === 100) {
+              toast({
+                title: `Upload: ${percentage}%`,
+                description: percentage === 100 ? 
+                  "Upload complete! Processing file..." : 
+                  `Uploading ${fileName}`,
+                duration: 2000,
+              });
+            }
+          }
+        });
+        
+      if (error) {
+        throw error;
+      }
+      
+      // Create a signed URL with long expiry (10 years)
+      const tenYearsInSeconds = 315360000; // 10 years in seconds
+      const { data: signedUrlData, error: signedUrlError } = await supabase.storage
+        .from(STL_FILES_BUCKET)
+        .createSignedUrl(storagePath, tenYearsInSeconds);
+      
+      if (signedUrlError) {
+        console.error(`[${new Date().toISOString()}] Signed URL error:`, signedUrlError);
+        throw new Error(`Failed to create signed URL: ${signedUrlError.message}`);
+      }
+      
+      // Get public URL as backup
+      const { data: publicUrlData } = supabase.storage
+        .from(STL_FILES_BUCKET)
+        .getPublicUrl(storagePath);
+      
+      const result = {
+        success: true,
+        url: signedUrlData.signedUrl,
+        publicUrl: publicUrlData.publicUrl,
+        path: storagePath,
+        fileName: fileName,
+        fileSize: fileBlob.size,
+        direct: true
+      };
+      
+      console.log(`[${new Date().toISOString()}] DIRECT UPLOAD SUCCESS:`, result);
+      setDirectUploadResult(result);
+      
+      toast({
+        title: "Upload complete!",
+        description: "Your 3D model has been uploaded successfully.",
+        variant: "default",
+        duration: 3000,
+      });
+      
+      return result;
+    } catch (error) {
+      console.error(`[${new Date().toISOString()}] DIRECT UPLOAD ERROR:`, error);
+      
+      // Create a descriptive error message
+      const errorMessage = error instanceof Error 
+        ? error.message 
+        : 'Unknown upload error';
+      
+      toast({
+        title: "Upload failed",
+        description: `Could not upload file: ${errorMessage}`,
+        variant: "destructive",
+        duration: 5000,
+      });
+      
+      // Even if upload fails, return a placeholder to allow checkout to continue
+      return {
+        success: false,
+        path: `failed-${Date.now()}-${fileName}`,
+        fileName: fileName,
+        error: errorMessage,
+        direct: true,
+        placeholder: true
+      };
+    } finally {
+      setIsUploading(false);
+      setUploadProgress(0);
+    }
+  };
+
+  // Legacy function to upload file to Supabase via serverless API
   const uploadFileToSupabase = async (fileData: string, fileName: string) => {
     console.log(`[${new Date().toISOString()}] SUPABASE UPLOAD: Uploading file to Supabase: ${fileName}`);
     
@@ -1340,44 +1619,25 @@ const Print3DTab = () => {
       const decodedSize = Math.ceil((base64Data.length * 3) / 4);
       console.log(`[${new Date().toISOString()}] Estimated file size: ${Math.round(decodedSize / 1024)}KB`);
       
-      // Add checksum to verify data integrity
-      const fileChecksum = await generateChecksum(base64Data);
-      console.log(`[${new Date().toISOString()}] File checksum: ${fileChecksum.slice(0, 8)}...`);
-      
       // Generate a unique filename with timestamp to avoid conflicts
       const timestamp = Date.now();
       const uniqueFileName = `${timestamp}-${fileName}`;
       
-      // Show upload toast
+      // For large files, use direct upload to Supabase instead of going through Vercel
+      if (decodedSize > 4 * 1024 * 1024) {
+        console.log(`[${new Date().toISOString()}] File is > 4MB, using direct Supabase upload`);
+        return await uploadDirectToSupabase(fileData, fileName);
+      }
+      
+      // For smaller files, we can still use the server API route
       toast({
         title: "Uploading model...",
-        description: decodedSize > 4 * 1024 * 1024 ? 
-          `Large model (${Math.round(decodedSize / (1024 * 1024))}MB). Using chunked upload.` : 
-          "Uploading model to server",
-        duration: 5000,
+        description: "Uploading model to server",
+        duration: 3000,
       });
       
-      let uploadResult;
-      
-      // DIFFERENT STRATEGIES BASED ON FILE SIZE
-      if (decodedSize > 4 * 1024 * 1024) {
-        // For files larger than 4MB, use chunked upload to work around Vercel limits
-        console.log(`[${new Date().toISOString()}] Using chunked upload for large file`);
-        
-        try {
-          // First attempt direct upload in case the server-side config fixed the issue
-          console.log(`[${new Date().toISOString()}] Attempting direct upload first...`);
-          uploadResult = await uploadStandardFile(base64Data, uniqueFileName, false);
-        } catch (directError) {
-          console.log(`[${new Date().toISOString()}] Direct upload failed, switching to chunked upload:`, directError);
-          // If direct upload fails, fall back to chunked upload
-          uploadResult = await uploadLargeFileInChunks(base64Data, uniqueFileName, fileChecksum);
-        }
-      } else {
-        // For smaller files, use standard upload
-        console.log(`[${new Date().toISOString()}] Using standard upload for small file`);
-        uploadResult = await uploadStandardFile(base64Data, uniqueFileName, true);
-      }
+      // Upload using standard API endpoint
+      const uploadResult = await uploadStandardFile(base64Data, uniqueFileName, true);
       
       console.log(`[${new Date().toISOString()}] SUPABASE UPLOAD SUCCESS:`, uploadResult);
       
@@ -1391,40 +1651,28 @@ const Print3DTab = () => {
     } catch (error) {
       console.error(`[${new Date().toISOString()}] SUPABASE UPLOAD ERROR:`, error);
       
-      // For very large files, we'll create a placeholder entry to allow checkout to continue
-      const decodedSize = fileData.includes('base64,') 
-        ? Math.ceil((fileData.split('base64,')[1].length * 3) / 4)
-        : Math.ceil((fileData.length * 3) / 4);
-        
-      if (decodedSize > 20 * 1024 * 1024) { // If file is over 20MB
-        console.log(`[${new Date().toISOString()}] Large file upload failed. Creating placeholder for checkout.`);
+      // For any errors, fall back to direct upload
+      console.log(`[${new Date().toISOString()}] API upload failed, falling back to direct upload`);
+      
+      try {
+        return await uploadDirectToSupabase(fileData, fileName);
+      } catch (directError) {
+        console.error(`[${new Date().toISOString()}] Direct upload also failed:`, directError);
         
         toast({
-          title: "Upload partially complete",
-          description: "Your file is very large. We'll proceed with checkout and complete the upload afterward.",
-          variant: "default",
-          duration: 5000,
+          title: "Upload failed",
+          description: "Could not upload your file. Please try again.",
+          variant: "destructive",
         });
         
-        // Return a placeholder result to allow checkout to continue
+        // Last resort - return a placeholder
         return {
-          success: true,
-          path: `placeholder-${Date.now()}-${fileName}`,
+          success: false,
+          path: `error-${Date.now()}-${fileName}`,
           fileName: fileName,
-          fileSize: decodedSize,
-          url: `placeholder-url-${Date.now()}`,
-          publicUrl: `placeholder-public-url-${Date.now()}`,
-          status: 'pending',
           placeholder: true
         };
       }
-      
-      toast({
-        title: "Upload failed",
-        description: "Could not upload your file. Please try again.",
-        variant: "destructive",
-      });
-      throw error; // Re-throw to be handled by the caller
     }
   };
   
@@ -1922,6 +2170,17 @@ const Print3DTab = () => {
             </Select>
           </div>
 
+          {/* Upload progress indicator */}
+          {isUploading && (
+            <div className="space-y-2">
+              <div className="flex justify-between text-xs text-muted-foreground">
+                <span>Uploading directly to storage...</span>
+                <span>{uploadProgress}%</span>
+              </div>
+              <Progress value={uploadProgress} className="h-2" />
+            </div>
+          )}
+
           {/* Selected model info or upload button */}
           <div>
             {selectedModelIndex !== null ? (
@@ -1934,21 +2193,84 @@ const Print3DTab = () => {
                 </CardContent>
               </Card>
             ) : uploadedModelData ? (
-              <Card className="bg-muted/50">
-                <CardContent className="p-3">
-                  <div className="text-sm text-foreground">
-                    <span className="font-medium">Uploaded:</span>{" "}
-                    Custom Model
-                  </div>
-                </CardContent>
-              </Card>
+              <div className="space-y-2">
+                <Card className="bg-muted/50">
+                  <CardContent className="p-3">
+                    <div className="flex justify-between items-center">
+                      <div className="text-sm text-foreground">
+                        <span className="font-medium">Uploaded:</span>{" "}
+                        {typeof uploadedModelData === 'object' && 'fileName' in uploadedModelData ? 
+                          uploadedModelData.fileName : "Custom Model"}
+                      </div>
+                      {directUploadResult?.success && (
+                        <CheckCircle className="h-4 w-4 text-green-500" />
+                      )}
+                    </div>
+                    {directUploadResult?.path ? (
+                      <div className="text-xs text-muted-foreground mt-1 truncate">
+                        {directUploadResult.fileSize ? `${Math.round(directUploadResult.fileSize / (1024 * 1024))}MB` : ''} 
+                        {directUploadResult.direct ? ' • Direct upload' : ''}
+                      </div>
+                    ) : (
+                      <div className="text-xs text-muted-foreground mt-1 truncate">
+                        {typeof uploadedModelData === 'object' && 'fileSize' in uploadedModelData ? 
+                          `${Math.round((uploadedModelData.fileSize as number) / (1024 * 1024))}MB` : ""}
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+                
+                {!directUploadResult?.success && typeof uploadedModelData === 'object' && 'data' in uploadedModelData && uploadedModelData.data && (
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    className="w-full text-xs" 
+                    onClick={async () => {
+                      try {
+                        if (typeof uploadedModelData === 'object' && 'data' in uploadedModelData && 'fileName' in uploadedModelData) {
+                          await uploadDirectToSupabase(
+                            uploadedModelData.data, 
+                            uploadedModelData.fileName
+                          );
+                        }
+                      } catch (err) {
+                        console.error('Error in direct upload:', err);
+                      }
+                    }}
+                    disabled={isUploading}
+                  >
+                    {isUploading ? (
+                      <>
+                        <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                        Uploading...
+                      </>
+                    ) : (
+                      <>
+                        <Upload className="mr-1 h-3 w-3" />
+                        Upload Directly to Storage
+                      </>
+                    )}
+                  </Button>
+                )}
+              </div>
             ) : (
               <Button
                 variant="outline"
                 className="w-full"
                 onClick={handleUploadModel}
+                disabled={isUploading}
               >
-                Upload STL Model
+                {isUploading ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Uploading...
+                  </>
+                ) : (
+                  <>
+                    <Upload className="mr-2 h-4 w-4" />
+                    Upload STL Model
+                  </>
+                )}
               </Button>
             )}
           </div>
@@ -2043,13 +2365,23 @@ const Print3DTab = () => {
 
         <Button
           onClick={handleCheckout}
-          disabled={isLoading || isPriceCalculating || !selectedFilament || (selectedModelIndex === null && !uploadedModelData) || priceSource === 'estimate'}
+          disabled={isLoading || isUploading || isPriceCalculating || !selectedFilament || (selectedModelIndex === null && !uploadedModelData) || priceSource === 'estimate'}
           className="bg-primary hover:bg-primary/90"
         >
           {isLoading ? (
             <>
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
               Processing
+            </>
+          ) : isUploading ? (
+            <>
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              Uploading...
+            </>
+          ) : directUploadResult?.success ? (
+            <>
+              <CheckCircle className="mr-2 h-4 w-4" />
+              Checkout {formatPrice(finalPrice)}
             </>
           ) : (
             `Checkout ${formatPrice(finalPrice)}`
