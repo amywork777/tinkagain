@@ -163,7 +163,7 @@ export function OrderSummary({
           <div className="font-medium">{formatPrice(basePrice)}</div>
           
           <div className="text-foreground">Shipping</div>
-          <div className="font-medium">{basePrice > 50 ? '$10.00' : '$5.00'}</div>
+          <div className="font-medium">{formatPrice(shippingCost || 0)}</div>
           
           <Separator className="col-span-2 my-1" />
           

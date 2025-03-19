@@ -418,12 +418,19 @@ const Print3DTab = () => {
           const materialCost = quantityAdjustedBasePrice * 0.4; // 40% of base for materials
           const printingCost = quantityAdjustedBasePrice * 0.6; // 60% of base for printing process
 
+          // First round to 2 decimal places
+          const roundedBasePrice = Number(quantityAdjustedBasePrice.toFixed(2));
+          const roundedShippingCost = Number(shipping.toFixed(2));
+          
+          // Calculate final price as exact sum of rounded components to ensure math adds up
+          const exactFinalPrice = roundedBasePrice + roundedShippingCost;
+          
           // Set state with calculated values
-          setBasePrice(Number(quantityAdjustedBasePrice.toFixed(2)));
+          setBasePrice(roundedBasePrice);
           setMaterialCost(Number(materialCost.toFixed(2)));
           setPrintingCost(Number(printingCost.toFixed(2)));
-          setShippingCost(Number(shipping.toFixed(2)));
-          setFinalPrice(Number((quantityAdjustedBasePrice + shipping).toFixed(2)));
+          setShippingCost(roundedShippingCost);
+          setFinalPrice(Number(exactFinalPrice.toFixed(2)));
           setComplexityFactor(complexityFactor);
           setPriceSource('api');
 
@@ -457,11 +464,19 @@ const Print3DTab = () => {
 
         // Use more aggressive fallback prices for uploaded models since we have less info
         const basePrice = fallbackPrices.basePrice * 1.2; // 20% higher due to unknown geometry
+        
+        // First round to 2 decimal places
+        const roundedBasePrice = Number(basePrice.toFixed(2));
+        const roundedShippingCost = Number(fallbackPrices.shippingCost.toFixed(2));
+        
+        // Calculate final price as exact sum of rounded components
+        const exactFinalPrice = roundedBasePrice + roundedShippingCost;
 
-        setBasePrice(Number(basePrice.toFixed(2)));
+        setBasePrice(roundedBasePrice);
         setMaterialCost(Number((basePrice * 0.4).toFixed(2)));
         setPrintingCost(Number((basePrice * 0.6).toFixed(2)));
-        setFinalPrice(Number((basePrice + fallbackPrices.shippingCost).toFixed(2)));
+        setShippingCost(roundedShippingCost);
+        setFinalPrice(Number(exactFinalPrice.toFixed(2)));
 
         toast({
           title: "Estimated price calculated",
