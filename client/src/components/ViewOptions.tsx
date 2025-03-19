@@ -10,8 +10,64 @@ export function ViewOptions() {
     showGrid, 
     setShowGrid, 
     showAxes, 
-    setShowAxes 
+    setShowAxes,
+    scene,  // Get scene directly for more direct updates
+    renderer,
+    camera
   } = useScene();
+
+  // Functions to handle visibility changes with direct scene updates
+  const handleGridVisibilityChange = (checked: boolean) => {
+    console.log(`ViewOptions: Grid checkbox changed to ${checked}`);
+    
+    // First update the state in useScene
+    setShowGrid(!!checked);
+    
+    // Then directly update the object if possible for immediate feedback
+    if (scene) {
+      const gridHelper = scene.children.find(child => child.name === 'gridHelper');
+      if (gridHelper) {
+        console.log(`ViewOptions: Directly updating grid helper to ${checked}`);
+        gridHelper.visible = checked;
+        
+        // Force render if possible
+        if (renderer && camera) {
+          renderer.render(scene, camera);
+        }
+      }
+    }
+    
+    // Also dispatch our own event as an extra measure
+    window.dispatchEvent(new CustomEvent('view-option-changed', { 
+      detail: { type: 'grid', value: checked }
+    }));
+  };
+  
+  const handleAxesVisibilityChange = (checked: boolean) => {
+    console.log(`ViewOptions: Axes checkbox changed to ${checked}`);
+    
+    // First update the state in useScene
+    setShowAxes(!!checked);
+    
+    // Then directly update the object if possible for immediate feedback
+    if (scene) {
+      const axesHelper = scene.children.find(child => child.name === 'axesHelper');
+      if (axesHelper) {
+        console.log(`ViewOptions: Directly updating axes helper to ${checked}`);
+        axesHelper.visible = checked;
+        
+        // Force render if possible
+        if (renderer && camera) {
+          renderer.render(scene, camera);
+        }
+      }
+    }
+    
+    // Also dispatch our own event as an extra measure
+    window.dispatchEvent(new CustomEvent('view-option-changed', { 
+      detail: { type: 'axes', value: checked }
+    }));
+  };
 
   return (
     <div className="p-4 border-t">
@@ -54,18 +110,22 @@ export function ViewOptions() {
             <Checkbox 
               id="show-grid" 
               checked={showGrid}
-              onCheckedChange={(checked) => setShowGrid(!!checked)}
+              onCheckedChange={handleGridVisibilityChange}
             />
-            <Label htmlFor="show-grid">Show Grid</Label>
+            <Label htmlFor="show-grid" onClick={() => handleGridVisibilityChange(!showGrid)}>
+              Show Grid
+            </Label>
           </div>
           
           <div className="flex items-center space-x-2">
             <Checkbox 
               id="show-axes" 
               checked={showAxes}
-              onCheckedChange={(checked) => setShowAxes(!!checked)}
+              onCheckedChange={handleAxesVisibilityChange}
             />
-            <Label htmlFor="show-axes">Show Axes</Label>
+            <Label htmlFor="show-axes" onClick={() => handleAxesVisibilityChange(!showAxes)}>
+              Show Axes
+            </Label>
           </div>
         </div>
       </div>

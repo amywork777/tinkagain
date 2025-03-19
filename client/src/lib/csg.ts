@@ -10,10 +10,10 @@ export function performBoolean(
   try {
     console.log(`Attempting ${operation} operation between two meshes`);
     
-    // For union operations, always use direct merge instead of CSG
+    // For union operations, use the most basic approach - just combine geometries
     if (operation === 'union') {
-      console.log("Using direct mesh merge for union operation");
-      return performDirectMerge(meshA, meshB);
+      console.log("Using simple geometry combination for union operation");
+      return simpleCombineMeshes(meshA, meshB);
     }
     
     // For subtract and intersect operations, use the CSG approach with extra precautions
@@ -60,10 +60,10 @@ export function performBoolean(
     // If CSG failed but operation was union, try direct merge as fallback
     if (operation === 'union') {
       try {
-        console.warn("CSG union failed, trying direct merge as fallback");
-        return performDirectMerge(meshA, meshB);
+        console.warn("Union failed, trying absolute simplest approach as fallback");
+        return simpleCombineMeshes(meshA, meshB);
       } catch (mergeError) {
-        console.error("Both CSG and direct merge failed:", mergeError);
+        console.error("All union approaches failed:", mergeError);
       }
     } else {
       // For subtract/intersect, try with simplified geometries as fallback
@@ -129,9 +129,52 @@ function simplifyMesh(mesh: THREE.Mesh, simplificationRatio: number): THREE.Mesh
   return mesh;
 }
 
-// Helper function for direct merge (more reliable for union operations)
+// Ultra simple approach to just combine two meshes with no boolean operations
+function simpleCombineMeshes(meshA: THREE.Mesh, meshB: THREE.Mesh): THREE.Mesh {
+  console.log("Using simpleCombineMeshes - straightforward geometry combination");
+  
+  // Clone the geometries to avoid modifying the originals
+  const geomA = meshA.geometry.clone();
+  const geomB = meshB.geometry.clone();
+  
+  // Apply world matrices to the geometries to ensure correct positioning
+  meshA.updateWorldMatrix(true, false);
+  meshB.updateWorldMatrix(true, false);
+  geomA.applyMatrix4(meshA.matrixWorld);
+  geomB.applyMatrix4(meshB.matrixWorld);
+  
+  // Make sure basic attributes are present
+  if (!geomA.attributes.normal) geomA.computeVertexNormals();
+  if (!geomB.attributes.normal) geomB.computeVertexNormals();
+  
+  // Most basic approach - just combine them
+  console.log("Simply combining geometries without boolean operations");
+  const mergedGeometry = BufferGeometryUtils.mergeGeometries([geomA, geomB], false);
+  
+  // Create a basic material from the primary mesh
+  let material;
+  if (meshA.material instanceof THREE.Material) {
+    material = meshA.material.clone();
+  } else if (Array.isArray(meshA.material) && meshA.material.length > 0) {
+    material = meshA.material[0].clone();
+  } else {
+    // Fallback material if something went wrong
+    material = new THREE.MeshStandardMaterial({
+      color: 0x3080FF,
+      side: THREE.DoubleSide
+    });
+  }
+  
+  // Create the result mesh
+  const resultMesh = new THREE.Mesh(mergedGeometry, material);
+  
+  console.log("Simple mesh combination completed");
+  return resultMesh;
+}
+
+// Original direct merge function - kept as a fallback
 function performDirectMerge(meshA: THREE.Mesh, meshB: THREE.Mesh): THREE.Mesh {
-  console.log("Performing direct merge of two meshes");
+  console.log("Performing advanced direct merge of two meshes");
   
   // Clone the geometries and apply transformations
   const geomA = meshA.geometry.clone();

@@ -1849,68 +1849,127 @@ export const useScene = create<SceneState>((set, get) => {
     setShowGrid: (show: boolean) => {
       const state = get();
       
-      // Store the setting in state first
+      console.log(`Setting grid visibility to ${show}`);
+      
+      // First, save the value in the state
       set({ showGrid: show });
       
-      // Update the grid helper visibility
-      const gridHelper = state.scene.children.find(child => child.name === 'gridHelper');
-      if (gridHelper) {
-        console.log(`Setting grid visibility to ${show} via useScene hook`);
-        gridHelper.visible = show;
-        
-        // Force a render update 
-        if (state.renderer && state.camera) {
-          state.renderer.render(state.scene, state.camera);
-        }
-        
-        // Schedule another render after a short delay to ensure it's applied
-        setTimeout(() => {
-          if (state.renderer && state.camera) {
-            console.log(`Delayed render for grid visibility: ${show}`);
-            state.renderer.render(state.scene, state.camera);
+      try {
+        // Direct approach to immediately update the grid visibility
+        if (state.scene) {
+          // Find the grid helper by name
+          const gridHelper = state.scene.children.find(child => child.name === 'gridHelper');
+          
+          if (gridHelper) {
+            // Set visibility directly on the object
+            gridHelper.visible = show;
+            console.log(`Grid helper visibility set to ${show}`);
+            
+            // Force a render update if renderer is available
+            if (state.renderer && state.camera) {
+              state.renderer.render(state.scene, state.camera);
+              console.log("Forced immediate render for grid update");
+            }
+            
+            // Force multiple renders to ensure changes take effect
+            [50, 100, 250, 500].forEach(delay => {
+              setTimeout(() => {
+                if (state.renderer && state.camera && state.scene) {
+                  console.log(`Delayed render at ${delay}ms for grid visibility: ${show}`);
+                  state.renderer.render(state.scene, state.camera);
+                }
+              }, delay);
+            });
+            
+            // Broadcast the change to other components
+            window.dispatchEvent(new CustomEvent('scene-update', { 
+              detail: { type: 'grid-visibility', value: show }
+            }));
+          } else {
+            console.warn("Grid helper object not found in scene");
+            
+            // Try to recreate it
+            if (state.scene && !state.scene.children.find(child => child.name === 'gridHelper')) {
+              console.log("Creating new grid helper since it was not found");
+              const newGridHelper = new THREE.GridHelper(500, 100);
+              newGridHelper.name = 'gridHelper';
+              newGridHelper.visible = show;
+              state.scene.add(newGridHelper);
+              
+              if (state.renderer && state.camera) {
+                state.renderer.render(state.scene, state.camera);
+              }
+            }
           }
-        }, 100);
-      } else {
-        console.warn("Grid helper not found when trying to toggle visibility");
+        } else {
+          console.warn("Scene not available - grid visibility change will apply when scene is created");
+        }
+      } catch (error) {
+        console.error("Error changing grid visibility:", error);
       }
-      
-      // Dispatch an event that the Viewport component can listen to
-      window.dispatchEvent(new CustomEvent('grid-visibility-changed', { detail: { visible: show } }));
-      
-      console.log(`Grid visibility set to: ${show}`);
     },
+    
     setShowAxes: (show: boolean) => {
       const state = get();
       
-      // Store the setting in state first
+      console.log(`Setting axes visibility to ${show}`);
+      
+      // First, save the value in the state
       set({ showAxes: show });
       
-      // Update the axes helper visibility
-      const axesHelper = state.scene.children.find(child => child.name === 'axesHelper');
-      if (axesHelper) {
-        console.log(`Setting axes visibility to ${show} via useScene hook`);
-        axesHelper.visible = show;
-        
-        // Force a render update
-        if (state.renderer && state.camera) {
-          state.renderer.render(state.scene, state.camera);
-        }
-        
-        // Schedule another render after a short delay to ensure it's applied
-        setTimeout(() => {
-          if (state.renderer && state.camera) {
-            console.log(`Delayed render for axes visibility: ${show}`);
-            state.renderer.render(state.scene, state.camera);
+      try {
+        // Direct approach to immediately update the axes visibility
+        if (state.scene) {
+          // Find the axes helper by name
+          const axesHelper = state.scene.children.find(child => child.name === 'axesHelper');
+          
+          if (axesHelper) {
+            // Set visibility directly on the object
+            axesHelper.visible = show;
+            console.log(`Axes helper visibility set to ${show}`);
+            
+            // Force a render update if renderer is available
+            if (state.renderer && state.camera) {
+              state.renderer.render(state.scene, state.camera);
+              console.log("Forced immediate render for axes update");
+            }
+            
+            // Force multiple renders to ensure changes take effect
+            [50, 100, 250, 500].forEach(delay => {
+              setTimeout(() => {
+                if (state.renderer && state.camera && state.scene) {
+                  console.log(`Delayed render at ${delay}ms for axes visibility: ${show}`);
+                  state.renderer.render(state.scene, state.camera);
+                }
+              }, delay);
+            });
+            
+            // Broadcast the change to other components
+            window.dispatchEvent(new CustomEvent('scene-update', { 
+              detail: { type: 'axes-visibility', value: show }
+            }));
+          } else {
+            console.warn("Axes helper object not found in scene");
+            
+            // Try to recreate it
+            if (state.scene && !state.scene.children.find(child => child.name === 'axesHelper')) {
+              console.log("Creating new axes helper since it was not found");
+              const newAxesHelper = new THREE.AxesHelper(250);
+              newAxesHelper.name = 'axesHelper';
+              newAxesHelper.visible = show;
+              state.scene.add(newAxesHelper);
+              
+              if (state.renderer && state.camera) {
+                state.renderer.render(state.scene, state.camera);
+              }
+            }
           }
-        }, 100);
-      } else {
-        console.warn("Axes helper not found when trying to toggle visibility");
+        } else {
+          console.warn("Scene not available - axes visibility change will apply when scene is created");
+        }
+      } catch (error) {
+        console.error("Error changing axes visibility:", error);
       }
-      
-      // Dispatch an event that the Viewport component can listen to
-      window.dispatchEvent(new CustomEvent('axes-visibility-changed', { detail: { visible: show } }));
-      
-      console.log(`Axes visibility set to: ${show}`);
     },
 
     // Add function to set rendering mode
