@@ -4,6 +4,7 @@ import { STLLoader } from "three/examples/jsm/loaders/STLLoader.js";
 import { STLExporter } from "three/examples/jsm/exporters/STLExporter.js";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { CSG } from 'three-csg-ts';
+import { performSimpleBooleanOperation } from '@/lib/csg';
 import { SVGLoader } from "three/examples/jsm/loaders/SVGLoader.js";
 import { FontLoader } from "three/examples/jsm/loaders/FontLoader.js";
 import { TextGeometry, TextGeometryParameters } from "three/examples/jsm/geometries/TextGeometry.js";

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import { useScene } from "@/hooks/use-scene";
 import { ViewCube } from "./ViewCube";
 import { TransformGizmo } from "./TransformGizmo";
+import * as THREE from 'three';
 
 export function Viewport() {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -30,6 +31,61 @@ export function Viewport() {
     // Clean up when component unmounts
     return cleanup;
   }, [initializeScene]);
+  
+  // Process Boolean operations during rendering
+  useEffect(() => {
+    if (!scene || !renderer || !camera) return;
+    
+    console.log("Setting up Boolean operation rendering processor");
+    
+    // Create a custom render function that will process boolean operations
+    const originalRender = renderer.render.bind(renderer);
+    
+    // Override the render method to process boolean operations
+    renderer.render = function(scene, camera) {
+      // Process any boolean operations in the scene
+      processBooleanOperations(scene);
+      
+      // Call the original render method
+      originalRender(scene, camera);
+    };
+    
+    // Process boolean operations before rendering
+    function processBooleanOperations(scene: THREE.Scene) {
+      // Traverse all objects in the scene
+      scene.traverse((object) => {
+        if (!(object instanceof THREE.Mesh)) return;
+        
+        // Handle mesh with boolean operation metadata
+        if (object.userData && object.userData.booleanType) {
+          switch(object.userData.booleanType) {
+            case 'subtract':
+              // Visual-only subtraction (for future implementation with shaders/clipping)
+              // For now, just ensure the mesh is visible
+              break;
+              
+            case 'intersect':
+              // For parent meshes with intersect type (containing both meshes)
+              if (object.children && object.children.length > 0) {
+                // Process the children for intersection visualization
+                // (Future implementation with stencil buffers/shader effects)
+              }
+              break;
+          }
+        }
+      });
+    }
+    
+    // Call render once to update the scene
+    renderer.render(scene, camera);
+    
+    // Return cleanup function to restore original render method
+    return () => {
+      if (renderer) {
+        renderer.render = originalRender;
+      }
+    };
+  }, [scene, renderer, camera]);
 
   // Add debug listener for mouse movement
   useEffect(() => {

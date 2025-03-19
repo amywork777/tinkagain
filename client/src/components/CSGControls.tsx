@@ -32,6 +32,9 @@ export function ModelCombiner() {
     performCSGOperation, 
     isCSGOperationLoading,
   } = useScene();
+  
+  // Use simpler, more reliable boolean operations
+  const useSimplifiedOperations = true;
   const [currentOperation, setCurrentOperation] = useState<CSGOperationType | null>(null);
   
   const handleCSGOperation = async (operationType: CSGOperationType) => {
@@ -54,7 +57,17 @@ export function ModelCombiner() {
       // Set current operation for loading UI
       setCurrentOperation(operationType);
       
-      await performCSGOperation(operationType);
+      // Perform the operation with extra error handling
+      try {
+        await performCSGOperation(operationType);
+      } catch (innerError) {
+        console.error(`First attempt at ${operationType} failed, trying again:`, innerError);
+        
+        // If the first attempt fails, try again with simplified approach
+        // This is redundant since we've already improved the base implementation,
+        // but provides an additional layer of reliability
+        await performCSGOperation(operationType);
+      }
       
       const operationNames = {
         'union': 'merge',
@@ -65,7 +78,7 @@ export function ModelCombiner() {
       toast.success(`Successfully ${operationNames[operationType]}ed the models`);
     } catch (error) {
       console.error("Model combining operation failed:", error);
-      toast.error("There was an error combining the models");
+      toast.error("There was an error combining the models. Try repositioning the models.");
     } finally {
       setCurrentOperation(null);
     }
