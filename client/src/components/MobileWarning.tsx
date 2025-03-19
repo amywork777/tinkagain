@@ -122,7 +122,7 @@ const MobileWarning: React.FC<MobileWarningProps> = ({ onUseMobileVersion }) => 
           
           <Button onClick={handleUseMobileVersion} variant="outline">
             <SmartphoneIcon className="h-4 w-4 mr-2" />
-            Try Simple Mobile Viewer (Limited)
+            Try Magic Taiyaki AI
           </Button>
           
           <Button onClick={handleContinueToDesktop} variant="outline" className="text-sm opacity-70">
