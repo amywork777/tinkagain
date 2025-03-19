@@ -1848,25 +1848,67 @@ export const useScene = create<SceneState>((set, get) => {
     },
     setShowGrid: (show: boolean) => {
       const state = get();
+      
+      // Store the setting in state first
       set({ showGrid: show });
       
       // Update the grid helper visibility
       const gridHelper = state.scene.children.find(child => child.name === 'gridHelper');
       if (gridHelper) {
+        console.log(`Setting grid visibility to ${show} via useScene hook`);
         gridHelper.visible = show;
+        
+        // Force a render update 
+        if (state.renderer && state.camera) {
+          state.renderer.render(state.scene, state.camera);
+        }
+        
+        // Schedule another render after a short delay to ensure it's applied
+        setTimeout(() => {
+          if (state.renderer && state.camera) {
+            console.log(`Delayed render for grid visibility: ${show}`);
+            state.renderer.render(state.scene, state.camera);
+          }
+        }, 100);
+      } else {
+        console.warn("Grid helper not found when trying to toggle visibility");
       }
+      
+      // Dispatch an event that the Viewport component can listen to
+      window.dispatchEvent(new CustomEvent('grid-visibility-changed', { detail: { visible: show } }));
       
       console.log(`Grid visibility set to: ${show}`);
     },
     setShowAxes: (show: boolean) => {
       const state = get();
+      
+      // Store the setting in state first
       set({ showAxes: show });
       
       // Update the axes helper visibility
       const axesHelper = state.scene.children.find(child => child.name === 'axesHelper');
       if (axesHelper) {
+        console.log(`Setting axes visibility to ${show} via useScene hook`);
         axesHelper.visible = show;
+        
+        // Force a render update
+        if (state.renderer && state.camera) {
+          state.renderer.render(state.scene, state.camera);
+        }
+        
+        // Schedule another render after a short delay to ensure it's applied
+        setTimeout(() => {
+          if (state.renderer && state.camera) {
+            console.log(`Delayed render for axes visibility: ${show}`);
+            state.renderer.render(state.scene, state.camera);
+          }
+        }, 100);
+      } else {
+        console.warn("Axes helper not found when trying to toggle visibility");
       }
+      
+      // Dispatch an event that the Viewport component can listen to
+      window.dispatchEvent(new CustomEvent('axes-visibility-changed', { detail: { visible: show } }));
       
       console.log(`Axes visibility set to: ${show}`);
     },
