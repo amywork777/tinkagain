@@ -8,17 +8,12 @@ export function performBoolean(
   operation: 'union' | 'subtract' | 'intersect'
 ): THREE.Mesh {
   try {
-    // Special case for union - try direct merge first
+    // Always try direct merge for union operation - more reliable for complex geometry
     if (operation === 'union') {
-      try {
-        return performDirectMerge(meshA, meshB);
-      } catch (error) {
-        console.warn("Direct merge failed, falling back to CSG:", error);
-        // Fall back to CSG if direct merge fails
-      }
+      return performDirectMerge(meshA, meshB);
     }
     
-    // Standard CSG approach
+    // For subtract and intersect operations, use the CSG approach
     const bspA = CSG.fromMesh(meshA);
     const bspB = CSG.fromMesh(meshB);
     
@@ -45,6 +40,17 @@ export function performBoolean(
     return resultMesh;
   } catch (error) {
     console.error(`CSG operation '${operation}' failed:`, error);
+    
+    // If CSG failed but operation was union, try direct merge as fallback
+    if (operation === 'union') {
+      try {
+        console.warn("CSG union failed, trying direct merge as fallback");
+        return performDirectMerge(meshA, meshB);
+      } catch (mergeError) {
+        console.error("Both CSG and direct merge failed:", mergeError);
+      }
+    }
+    
     throw new Error(`The ${operation} operation failed. The models may have complex geometry or non-manifold surfaces.`);
   }
 }

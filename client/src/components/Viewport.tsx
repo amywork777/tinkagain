@@ -107,13 +107,23 @@ export function Viewport() {
     const gridHelper = scene.children.find(child => child.name === 'gridHelper');
     
     if (gridHelper) {
+      console.log(`Setting grid visibility to: ${showGrid}`);
       gridHelper.visible = showGrid;
       
       // Force renderer update
       if (renderer && camera) {
         renderer.render(scene, camera);
       }
+    } else {
+      console.warn('Grid helper not found in scene');
     }
+    
+    // Request animation frame to ensure update
+    requestAnimationFrame(() => {
+      if (renderer && camera && scene) {
+        renderer.render(scene, camera);
+      }
+    });
   }, [showGrid, scene, renderer, camera]);
 
   // Toggle axes visibility
@@ -124,6 +134,7 @@ export function Viewport() {
     const axesHelper = scene.children.find(child => child.name === 'axesHelper');
     
     if (axesHelper) {
+      console.log(`Setting axes visibility to: ${showAxes}`);
       // Just update visibility instead of adding/removing from scene
       axesHelper.visible = showAxes;
       
@@ -131,7 +142,16 @@ export function Viewport() {
       if (renderer && camera) {
         renderer.render(scene, camera);
       }
+    } else {
+      console.warn('Axes helper not found in scene');
     }
+    
+    // Request animation frame to ensure update
+    requestAnimationFrame(() => {
+      if (renderer && camera && scene) {
+        renderer.render(scene, camera);
+      }
+    });
   }, [showAxes, scene, renderer, camera]);
 
   return (

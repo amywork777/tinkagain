@@ -379,27 +379,6 @@ export const ToolBar = () => {
 
       <Separator orientation="vertical" className="h-6 mx-0.5" />
 
-      {/* Save to Drafts Button */}
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button
-            variant="outline"
-            size="icon"
-            onClick={handleSaveToDrafts}
-            disabled={selectedModelIndex === null || !isAuthenticated || isSavingToDrafts}
-          >
-            {isSavingToDrafts ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <FileText className="h-4 w-4" />
-            )}
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent>Save to Drafts</TooltipContent>
-      </Tooltip>
-
-      <Separator orientation="vertical" className="h-6 mx-0.5" />
-
       {/* Combine Models Popover */}
       <Tooltip>
         <TooltipTrigger asChild>
