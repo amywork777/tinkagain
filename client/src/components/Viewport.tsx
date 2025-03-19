@@ -222,8 +222,26 @@ export function Viewport() {
     const updateSceneHelpers = (forceUpdate = false) => {
       console.log(`Viewport: Updating helpers - Grid: ${showGrid}, Axes: ${showAxes}, Force: ${forceUpdate}`);
       
-      // GRID HELPER
-      let gridHelper = scene.children.find(child => child.name === 'gridHelper');
+      // GRID HELPER - Check for duplicates and maintain only one
+      // Check for ANY grid helpers - not just those named 'gridHelper'
+      const allGridHelpers = scene.children.filter(child => 
+        child.name === 'gridHelper' || 
+        child.type === 'GridHelper' ||
+        (child.constructor && child.constructor.name === 'GridHelper')
+      );
+      
+      // If we have more than one grid, remove all except the first one
+      if (allGridHelpers.length > 1) {
+        console.warn(`Viewport: Found ${allGridHelpers.length} grid helpers - removing duplicates`);
+        // Keep only the first grid
+        for (let i = 1; i < allGridHelpers.length; i++) {
+          console.log(`Removing duplicate grid helper: ${allGridHelpers[i].uuid}`);
+          scene.remove(allGridHelpers[i]);
+        }
+      }
+      
+      // Use the first grid if available, or create a new one if needed
+      let gridHelper = allGridHelpers[0];
       
       // Create grid helper if missing
       if (!gridHelper) {
@@ -232,6 +250,9 @@ export function Viewport() {
         gridHelper.name = 'gridHelper';
         gridHelper.position.y = -25;
         scene.add(gridHelper);
+      } else {
+        // Ensure the grid always has the correct name
+        gridHelper.name = 'gridHelper';
       }
       
       // Always set visibility to match state value
@@ -240,8 +261,26 @@ export function Viewport() {
         gridHelper.visible = showGrid;
       }
       
-      // AXES HELPER
-      let axesHelper = scene.children.find(child => child.name === 'axesHelper');
+      // AXES HELPER - Check for duplicates and maintain only one
+      // Check for ANY axes helpers - not just those named 'axesHelper'
+      const allAxesHelpers = scene.children.filter(child => 
+        child.name === 'axesHelper' || 
+        child.type === 'AxesHelper' ||
+        (child.constructor && child.constructor.name === 'AxesHelper')
+      );
+      
+      // If we have more than one axes, remove all except the first one
+      if (allAxesHelpers.length > 1) {
+        console.warn(`Viewport: Found ${allAxesHelpers.length} axes helpers - removing duplicates`);
+        // Keep only the first axes
+        for (let i = 1; i < allAxesHelpers.length; i++) {
+          console.log(`Removing duplicate axes helper: ${allAxesHelpers[i].uuid}`);
+          scene.remove(allAxesHelpers[i]);
+        }
+      }
+      
+      // Use the first axes if available, or create a new one if needed
+      let axesHelper = allAxesHelpers[0];
       
       // Create axes helper if missing
       if (!axesHelper) {
@@ -249,6 +288,9 @@ export function Viewport() {
         axesHelper = new THREE.AxesHelper(250);
         axesHelper.name = 'axesHelper';
         scene.add(axesHelper);
+      } else {
+        // Ensure the axes always has the correct name
+        axesHelper.name = 'axesHelper';
       }
       
       // Always set visibility to match state value
