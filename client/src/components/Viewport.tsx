@@ -155,61 +155,67 @@ export function Viewport() {
     }
   }, [cameraView, camera, renderer, scene]);
 
-  // Handle direct updates to grid and axes visibility in one effect
+  // Handle direct updates to grid and axes visibility with improved reliability
   useEffect(() => {
     if (!scene) return;
     
-    // Direct update to helper objects
-    const updateSceneHelpers = () => {
-      console.log("Viewport: Checking all helper visibility states");
+    console.log(`Viewport: showGrid=${showGrid}, showAxes=${showAxes} - Initializing or values changed`);
+    
+    // Direct update to helper objects - robust implementation with priority, redundancy
+    const updateSceneHelpers = (forceUpdate = false) => {
+      console.log(`Viewport: Updating helpers - Grid: ${showGrid}, Axes: ${showAxes}, Force: ${forceUpdate}`);
       
-      // Grid visibility - find and update
-      const gridHelper = scene.children.find(child => child.name === 'gridHelper');
-      if (gridHelper) {
-        // Force override visibility to match current state
-        if (gridHelper.visible !== showGrid) {
-          console.log(`Viewport: Updating grid visibility to match state: ${showGrid}`);
-          gridHelper.visible = showGrid;
-        }
-      } else {
-        console.warn('Viewport: No grid helper found in scene!');
-        
-        // Try to create one if missing
-        const newGridHelper = new THREE.GridHelper(500, 100);
-        newGridHelper.name = 'gridHelper';
-        newGridHelper.visible = showGrid;
-        newGridHelper.position.y = -25;
-        scene.add(newGridHelper);
-        console.log(`Viewport: Created new grid helper with visibility: ${showGrid}`);
+      // GRID HELPER
+      let gridHelper = scene.children.find(child => child.name === 'gridHelper');
+      
+      // Create grid helper if missing
+      if (!gridHelper) {
+        console.log('Viewport: Creating new grid helper');
+        gridHelper = new THREE.GridHelper(500, 100);
+        gridHelper.name = 'gridHelper';
+        gridHelper.position.y = -25;
+        scene.add(gridHelper);
       }
       
-      // Axes visibility - find and update
-      const axesHelper = scene.children.find(child => child.name === 'axesHelper');
-      if (axesHelper) {
-        // Force override visibility to match current state
-        if (axesHelper.visible !== showAxes) {
-          console.log(`Viewport: Updating axes visibility to match state: ${showAxes}`);
-          axesHelper.visible = showAxes;
-        }
-      } else {
-        console.warn('Viewport: No axes helper found in scene!');
-        
-        // Try to create one if missing
-        const newAxesHelper = new THREE.AxesHelper(250);
-        newAxesHelper.name = 'axesHelper';
-        newAxesHelper.visible = showAxes;
-        scene.add(newAxesHelper);
-        console.log(`Viewport: Created new axes helper with visibility: ${showAxes}`);
+      // Always set visibility to match state value
+      if (gridHelper.visible !== showGrid || forceUpdate) {
+        console.log(`Viewport: Setting grid visibility to ${showGrid}`);
+        gridHelper.visible = showGrid;
       }
       
-      // Force render
+      // AXES HELPER
+      let axesHelper = scene.children.find(child => child.name === 'axesHelper');
+      
+      // Create axes helper if missing
+      if (!axesHelper) {
+        console.log('Viewport: Creating new axes helper');
+        axesHelper = new THREE.AxesHelper(250);
+        axesHelper.name = 'axesHelper';
+        scene.add(axesHelper);
+      }
+      
+      // Always set visibility to match state value
+      if (axesHelper.visible !== showAxes || forceUpdate) {
+        console.log(`Viewport: Setting axes visibility to ${showAxes}`);
+        axesHelper.visible = showAxes;
+      }
+      
+      // RENDER - Schedule multiple renders for maximum reliability
       if (renderer && camera) {
+        // Immediate render
         renderer.render(scene, camera);
         
-        // Schedule additional renders to ensure it takes effect
-        [50, 150, 300, 500].forEach(delay => {
+        // Multiple delayed renders at different times
+        [20, 100, 300, 500].forEach(delay => {
           setTimeout(() => {
             if (renderer && camera && scene) {
+              // Double-check the visibility just before rendering
+              if (gridHelper && gridHelper.visible !== showGrid) {
+                gridHelper.visible = showGrid;
+              }
+              if (axesHelper && axesHelper.visible !== showAxes) {
+                axesHelper.visible = showAxes;
+              }
               renderer.render(scene, camera);
             }
           }, delay);
@@ -217,54 +223,54 @@ export function Viewport() {
       }
     };
     
-    // Run immediately
-    updateSceneHelpers();
+    // Run immediately when effect is triggered
+    updateSceneHelpers(true);
     
-    // Also add a general scene update listener
+    // Scene update listener - Handle events from other components
     const handleSceneUpdate = (event: any) => {
-      // React to specific update types
-      if (event.detail.type === 'grid-visibility' || event.detail.type === 'axes-visibility') {
-        console.log(`Viewport: Received scene update event: ${event.detail.type}=${event.detail.value}`);
-        
-        // Force a render update
-        if (renderer && camera) {
-          // Find and update all scene helpers
-          updateSceneHelpers();
-        }
+      console.log(`Viewport: Received event: ${event.type}, detail:`, event.detail);
+      
+      if (event.detail?.type === 'grid-visibility' || event.detail?.type === 'axes-visibility') {
+        // Enforce a render update
+        updateSceneHelpers(true);
       }
     };
     
-    // Listen for scene updates
+    // Listen for ALL relevant events that might affect visibility
     window.addEventListener('scene-update', handleSceneUpdate);
+    window.addEventListener('view-option-changed', handleSceneUpdate);
     
-    // Set up an animation loop that keeps checking visibility
+    // Polling backup - Keep checking visibility status
     const visibilityCheckInterval = setInterval(() => {
-      // Find helpers and ensure their visibility matches the state
-      const gridHelper = scene?.children.find(child => child.name === 'gridHelper');
-      const axesHelper = scene?.children.find(child => child.name === 'axesHelper');
+      const currentGridHelper = scene.children.find(child => child.name === 'gridHelper');
+      const currentAxesHelper = scene.children.find(child => child.name === 'axesHelper');
       
-      let needsRender = false;
+      let needsCorrection = false;
       
-      if (gridHelper && gridHelper.visible !== showGrid) {
-        console.log(`Viewport: Fixing grid visibility from interval: ${gridHelper.visible} → ${showGrid}`);
-        gridHelper.visible = showGrid;
-        needsRender = true;
+      // Check grid visibility
+      if (currentGridHelper && currentGridHelper.visible !== showGrid) {
+        console.log(`Viewport: Fixing grid visibility via interval: ${currentGridHelper.visible} → ${showGrid}`);
+        currentGridHelper.visible = showGrid;
+        needsCorrection = true;
       }
       
-      if (axesHelper && axesHelper.visible !== showAxes) {
-        console.log(`Viewport: Fixing axes visibility from interval: ${axesHelper.visible} → ${showAxes}`);
-        axesHelper.visible = showAxes;
-        needsRender = true;
+      // Check axes visibility
+      if (currentAxesHelper && currentAxesHelper.visible !== showAxes) {
+        console.log(`Viewport: Fixing axes visibility via interval: ${currentAxesHelper.visible} → ${showAxes}`);
+        currentAxesHelper.visible = showAxes;
+        needsCorrection = true;
       }
       
-      if (needsRender && renderer && camera && scene) {
+      // Render if needed
+      if (needsCorrection && renderer && camera) {
         renderer.render(scene, camera);
       }
-    }, 500); // Check every 500ms
+    }, 250); // Check more frequently for maximum responsiveness
     
-    // Cleanup
+    // Cleanup all resources
     return () => {
       window.removeEventListener('scene-update', handleSceneUpdate);
+      window.removeEventListener('view-option-changed', handleSceneUpdate);
       clearInterval(visibilityCheckInterval);
     };
   }, [showGrid, showAxes, scene, renderer, camera]);

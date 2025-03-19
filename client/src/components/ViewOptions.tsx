@@ -16,57 +16,69 @@ export function ViewOptions() {
     camera
   } = useScene();
 
-  // Functions to handle visibility changes with direct scene updates
+  // Functions to handle visibility changes
   const handleGridVisibilityChange = (checked: boolean) => {
     console.log(`ViewOptions: Grid checkbox changed to ${checked}`);
     
-    // First update the state in useScene
-    setShowGrid(!!checked);
+    // Cast to boolean in case we get undefined
+    const isChecked = !!checked;
     
-    // Then directly update the object if possible for immediate feedback
-    if (scene) {
+    // Update through the scene hook - this is the main source of truth
+    setShowGrid(isChecked);
+    
+    // Dispatch a scene-update event to ensure Viewport component handles it
+    window.dispatchEvent(new CustomEvent('scene-update', { 
+      detail: { type: 'grid-visibility', value: isChecked }
+    }));
+    
+    // Force render on this frame
+    if (scene && renderer && camera) {
+      // Find and update grid directly as a backup method
       const gridHelper = scene.children.find(child => child.name === 'gridHelper');
       if (gridHelper) {
-        console.log(`ViewOptions: Directly updating grid helper to ${checked}`);
-        gridHelper.visible = checked;
-        
-        // Force render if possible
-        if (renderer && camera) {
+        gridHelper.visible = isChecked;
+        renderer.render(scene, camera);
+      }
+      
+      // Schedule additional renders to ensure it takes effect (helps with race conditions)
+      setTimeout(() => {
+        if (renderer && camera && scene) {
           renderer.render(scene, camera);
         }
-      }
+      }, 50);
     }
-    
-    // Also dispatch our own event as an extra measure
-    window.dispatchEvent(new CustomEvent('view-option-changed', { 
-      detail: { type: 'grid', value: checked }
-    }));
   };
   
   const handleAxesVisibilityChange = (checked: boolean) => {
     console.log(`ViewOptions: Axes checkbox changed to ${checked}`);
     
-    // First update the state in useScene
-    setShowAxes(!!checked);
+    // Cast to boolean in case we get undefined
+    const isChecked = !!checked;
     
-    // Then directly update the object if possible for immediate feedback
-    if (scene) {
+    // Update through the scene hook - this is the main source of truth
+    setShowAxes(isChecked);
+    
+    // Dispatch a scene-update event to ensure Viewport component handles it
+    window.dispatchEvent(new CustomEvent('scene-update', { 
+      detail: { type: 'axes-visibility', value: isChecked }
+    }));
+    
+    // Force render on this frame
+    if (scene && renderer && camera) {
+      // Find and update axes directly as a backup method
       const axesHelper = scene.children.find(child => child.name === 'axesHelper');
       if (axesHelper) {
-        console.log(`ViewOptions: Directly updating axes helper to ${checked}`);
-        axesHelper.visible = checked;
-        
-        // Force render if possible
-        if (renderer && camera) {
+        axesHelper.visible = isChecked;
+        renderer.render(scene, camera);
+      }
+      
+      // Schedule additional renders to ensure it takes effect (helps with race conditions)
+      setTimeout(() => {
+        if (renderer && camera && scene) {
           renderer.render(scene, camera);
         }
-      }
+      }, 50);
     }
-    
-    // Also dispatch our own event as an extra measure
-    window.dispatchEvent(new CustomEvent('view-option-changed', { 
-      detail: { type: 'axes', value: checked }
-    }));
   };
 
   return (
@@ -112,7 +124,7 @@ export function ViewOptions() {
               checked={showGrid}
               onCheckedChange={handleGridVisibilityChange}
             />
-            <Label htmlFor="show-grid" onClick={() => handleGridVisibilityChange(!showGrid)}>
+            <Label htmlFor="show-grid">
               Show Grid
             </Label>
           </div>
@@ -123,7 +135,7 @@ export function ViewOptions() {
               checked={showAxes}
               onCheckedChange={handleAxesVisibilityChange}
             />
-            <Label htmlFor="show-axes" onClick={() => handleAxesVisibilityChange(!showAxes)}>
+            <Label htmlFor="show-axes">
               Show Axes
             </Label>
           </div>
