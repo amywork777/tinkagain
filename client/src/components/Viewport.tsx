@@ -6,18 +6,20 @@ import * as THREE from 'three';
 
 export function Viewport() {
   const containerRef = useRef<HTMLDivElement>(null);
-  const { 
-    scene, 
-    camera, 
-    renderer, 
-    initializeScene, 
-    models, 
-    selectedModelIndex,
-    cameraView,
-    showGrid,
-    showAxes,
-    setCameraView
-  } = useScene();
+  
+  // Use individual selectors for better performance and to prevent unnecessary rerenders
+  const scene = useScene(state => state.scene);
+  const camera = useScene(state => state.camera); 
+  const renderer = useScene(state => state.renderer);
+  const initializeScene = useScene(state => state.initializeScene);
+  const models = useScene(state => state.models);
+  const selectedModelIndex = useScene(state => state.selectedModelIndex);
+  const cameraView = useScene(state => state.cameraView);
+  const setCameraView = useScene(state => state.setCameraView);
+  
+  // Grid and axes visibility are extremely important
+  const showGrid = useScene(state => state.showGrid);
+  const showAxes = useScene(state => state.showAxes);
   
   // Initialize scene when component mounts
   useEffect(() => {
@@ -32,23 +34,67 @@ export function Viewport() {
     return cleanup;
   }, [initializeScene]);
   
-  // Process Boolean operations during rendering
+  // Process Boolean operations and grid/axes visibility during rendering
   useEffect(() => {
     if (!scene || !renderer || !camera) return;
     
-    console.log("Setting up Boolean operation rendering processor");
+    console.log("Setting up custom render processor with grid/axes enforcer");
     
-    // Create a custom render function that will process boolean operations
+    // Create a custom render function
     const originalRender = renderer.render.bind(renderer);
     
-    // Override the render method to process boolean operations
+    // Override the render method to enforce visibility and process operations
     renderer.render = function(scene, camera) {
+      // First, enforce grid and axes visibility EVERY frame
+      enforceHelperVisibility(scene);
+      
       // Process any boolean operations in the scene
       processBooleanOperations(scene);
       
       // Call the original render method
       originalRender(scene, camera);
     };
+    
+    // Enforce grid and axes visibility on every frame
+    function enforceHelperVisibility(scene: THREE.Scene) {
+      // Get the current state directly for critical values
+      const currentShowGrid = useScene.getState().showGrid;
+      const currentShowAxes = useScene.getState().showAxes;
+      
+      // Log visibility state for debugging
+      console.log(`Enforcing helper visibility - Grid: ${currentShowGrid}, Axes: ${currentShowAxes}`);
+      
+      // GRID HELPER - Find or create
+      let gridHelper = scene.children.find(child => child.name === 'gridHelper');
+      if (!gridHelper) {
+        console.log('Creating missing grid helper during render');
+        gridHelper = new THREE.GridHelper(500, 100);
+        gridHelper.name = 'gridHelper';
+        gridHelper.position.y = -25;
+        scene.add(gridHelper);
+      }
+      
+      // Always enforce current state
+      if (gridHelper.visible !== currentShowGrid) {
+        console.log(`Correcting grid visibility from ${gridHelper.visible} to ${currentShowGrid}`);
+        gridHelper.visible = currentShowGrid;
+      }
+      
+      // AXES HELPER - Find or create
+      let axesHelper = scene.children.find(child => child.name === 'axesHelper');
+      if (!axesHelper) {
+        console.log('Creating missing axes helper during render');
+        axesHelper = new THREE.AxesHelper(250);
+        axesHelper.name = 'axesHelper';
+        scene.add(axesHelper);
+      }
+      
+      // Always enforce current state
+      if (axesHelper.visible !== currentShowAxes) {
+        console.log(`Correcting axes visibility from ${axesHelper.visible} to ${currentShowAxes}`);
+        axesHelper.visible = currentShowAxes;
+      }
+    }
     
     // Process boolean operations before rendering
     function processBooleanOperations(scene: THREE.Scene) {
@@ -60,15 +106,13 @@ export function Viewport() {
         if (object.userData && object.userData.booleanType) {
           switch(object.userData.booleanType) {
             case 'subtract':
-              // Visual-only subtraction (for future implementation with shaders/clipping)
-              // For now, just ensure the mesh is visible
+              // Visual-only subtraction
               break;
               
             case 'intersect':
-              // For parent meshes with intersect type (containing both meshes)
+              // For parent meshes with intersect type
               if (object.children && object.children.length > 0) {
                 // Process the children for intersection visualization
-                // (Future implementation with stencil buffers/shader effects)
               }
               break;
           }
@@ -76,7 +120,8 @@ export function Viewport() {
       });
     }
     
-    // Call render once to update the scene
+    // Call render once to update the scene and trigger our overrides
+    console.log("Triggering initial render with enforced visibility");
     renderer.render(scene, camera);
     
     // Return cleanup function to restore original render method
