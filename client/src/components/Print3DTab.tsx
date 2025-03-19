@@ -872,9 +872,121 @@ const Print3DTab = () => {
                 stlFileData = typeof uploadedModelData.data === 'string' 
                   ? uploadedModelData.data 
                   : `data:application/octet-stream;base64,${Buffer.from(uploadedModelData.data as ArrayBuffer).toString('base64')}`;
+                
+                // Generate file identification for checkout data
+                const fileIdentifier = `${Date.now()}-${stlFileName}`;
+                checkoutData.filePath = fileIdentifier;
+                checkoutData.isUploading = true; // Flag to indicate upload in progress
+                
+                // REVERSED ORDER: Start Stripe checkout first
+                toast({
+                  title: "Starting checkout...",
+                  description: "Beginning the payment process while we upload your model",
+                  duration: 3000,
+                });
+                
+                // Start Stripe checkout process
+                console.log(`[${new Date().toISOString()}] Starting Stripe checkout before upload`);
+                const stripePromise = initiateStripeCheckout(checkoutData);
+                
+                // Start file upload in parallel
+                console.log(`[${new Date().toISOString()}] Starting file upload in parallel with checkout`);
+                const uploadPromise = uploadFileToSupabase(stlFileData, stlFileName)
+                  .catch(err => {
+                    console.error(`[${new Date().toISOString()}] Upload failed but checkout can continue:`, err);
+                    return {
+                      success: false,
+                      path: fileIdentifier,
+                      fileName: stlFileName,
+                      error: err.message,
+                      placeholder: true
+                    };
+                  });
+                
+                // Wait for both to complete, but prioritize the Stripe checkout
+                const [stripeResult, uploadResult] = await Promise.allSettled([stripePromise, uploadPromise]);
+                
+                // Log results
+                console.log(`[${new Date().toISOString()}] Stripe checkout status:`, stripeResult.status);
+                console.log(`[${new Date().toISOString()}] File upload status:`, uploadResult.status);
+                
+                // Handle Stripe checkout result
+                if (stripeResult.status === 'rejected') {
+                  throw stripeResult.reason;
+                }
+                
+                // Handle upload result (just log, since checkout is already done)
+                if (uploadResult.status === 'fulfilled') {
+                  console.log(`[${new Date().toISOString()}] Upload completed successfully:`, uploadResult.value);
+                } else {
+                  console.error(`[${new Date().toISOString()}] Upload failed:`, uploadResult.reason);
+                  toast({
+                    title: "Upload issue",
+                    description: "Note: Your file upload had issues, but payment was successful. Our team will help resolve this.",
+                    variant: "default",
+                    duration: 5000,
+                  });
+                }
+                
               } else if ('fileData' in uploadedModelData && uploadedModelData.fileData) {
                 console.log(`[${new Date().toISOString()}] Found fileData property in uploadedModelData`);
                 stlFileData = uploadedModelData.fileData as string;
+                
+                // Generate file identification for checkout data
+                const fileIdentifier = `${Date.now()}-${stlFileName}`;
+                checkoutData.filePath = fileIdentifier;
+                checkoutData.isUploading = true; // Flag to indicate upload in progress
+                
+                // REVERSED ORDER: Start Stripe checkout first
+                toast({
+                  title: "Starting checkout...",
+                  description: "Beginning the payment process while we upload your model",
+                  duration: 3000,
+                });
+                
+                // Start Stripe checkout process
+                console.log(`[${new Date().toISOString()}] Starting Stripe checkout before upload`);
+                const stripePromise = initiateStripeCheckout(checkoutData);
+                
+                // Start file upload in parallel
+                console.log(`[${new Date().toISOString()}] Starting file upload in parallel with checkout`);
+                const uploadPromise = uploadFileToSupabase(stlFileData, stlFileName)
+                  .catch(err => {
+                    console.error(`[${new Date().toISOString()}] Upload failed but checkout can continue:`, err);
+                    return {
+                      success: false,
+                      path: fileIdentifier,
+                      fileName: stlFileName,
+                      error: err.message,
+                      placeholder: true
+                    };
+                  });
+                
+                // Wait for both to complete, but prioritize the Stripe checkout
+                const [stripeResult, uploadResult] = await Promise.allSettled([stripePromise, uploadPromise]);
+                
+                // Log results
+                console.log(`[${new Date().toISOString()}] Stripe checkout status:`, stripeResult.status);
+                console.log(`[${new Date().toISOString()}] File upload status:`, uploadResult.status);
+                
+                // Handle Stripe checkout result
+                if (stripeResult.status === 'rejected') {
+                  throw stripeResult.reason;
+                }
+                
+                // Handle upload result (just log, since checkout is already done)
+                if (uploadResult.status === 'fulfilled') {
+                  console.log(`[${new Date().toISOString()}] Upload completed successfully:`, uploadResult.value);
+                } else {
+                  console.error(`[${new Date().toISOString()}] Upload failed:`, uploadResult.reason);
+                  toast({
+                    title: "Upload issue",
+                    description: "Note: Your file upload had issues, but payment was successful. Our team will help resolve this.",
+                    variant: "default",
+                    duration: 5000,
+                  });
+                }
+                
               } else if ('blob' in uploadedModelData && uploadedModelData.blob instanceof Blob) {
                 console.log(`[${new Date().toISOString()}] Found blob property in uploadedModelData`);
                 return new Promise<void>((resolve, reject) => {
@@ -883,27 +995,61 @@ const Print3DTab = () => {
                     if (event.target?.result) {
                       stlFileData = event.target.result as string;
                       try {
-                        // Try to upload file, but proceed with checkout even if it fails
-                        try {
-                          uploadResult = await uploadFileToSupabase(stlFileData, stlFileName);
-                        } catch (err) {
-                          uploadError = err;
-                          console.error(`[${new Date().toISOString()}] Upload failed but continuing with checkout:`, err);
-                          // Create a placeholder result for checkout
-                          uploadResult = {
-                            success: true,
-                            path: `error-placeholder-${Date.now()}-${stlFileName}`,
-                            fileName: stlFileName,
-                            url: `error-placeholder-url-${Date.now()}`,
-                            placeholder: true
-                          };
+                        // Generate file identification for checkout data
+                        const fileIdentifier = `${Date.now()}-${stlFileName}`;
+                        checkoutData.filePath = fileIdentifier;
+                        checkoutData.isUploading = true; // Flag to indicate upload in progress
+                        
+                        // REVERSED ORDER: Start Stripe checkout first
+                        toast({
+                          title: "Starting checkout...",
+                          description: "Beginning the payment process while we upload your model",
+                          duration: 3000,
+                        });
+                        
+                        // Start Stripe checkout process
+                        console.log(`[${new Date().toISOString()}] Starting Stripe checkout before upload`);
+                        const stripePromise = initiateStripeCheckout(checkoutData);
+                        
+                        // Start file upload in parallel
+                        console.log(`[${new Date().toISOString()}] Starting file upload in parallel with checkout`);
+                        const uploadPromise = uploadFileToSupabase(stlFileData, stlFileName)
+                          .catch(err => {
+                            console.error(`[${new Date().toISOString()}] Upload failed but checkout can continue:`, err);
+                            return {
+                              success: false,
+                              path: fileIdentifier,
+                              fileName: stlFileName,
+                              error: err.message,
+                              placeholder: true
+                            };
+                          });
+                        
+                        // Wait for both to complete, but prioritize the Stripe checkout
+                        const [stripeResult, uploadResult] = await Promise.allSettled([stripePromise, uploadPromise]);
+                        
+                        // Log results
+                        console.log(`[${new Date().toISOString()}] Stripe checkout status:`, stripeResult.status);
+                        console.log(`[${new Date().toISOString()}] File upload status:`, uploadResult.status);
+                        
+                        // Handle Stripe checkout result
+                        if (stripeResult.status === 'rejected') {
+                          throw stripeResult.reason;
                         }
                         
-                        // Add file info to checkout data
-                        checkoutData.filePath = uploadResult?.path || `failed-${stlFileName}`;
+                        // Handle upload result (just log, since checkout is already done)
+                        if (uploadResult.status === 'fulfilled') {
+                          console.log(`[${new Date().toISOString()}] Upload completed successfully:`, uploadResult.value);
+                        } else {
+                          console.error(`[${new Date().toISOString()}] Upload failed:`, uploadResult.reason);
+                          toast({
+                            title: "Upload issue",
+                            description: "Note: Your file upload had issues, but payment was successful. Our team will help resolve this.",
+                            variant: "default",
+                            duration: 5000,
+                          });
+                        }
                         
-                        // Proceed with checkout
-                        await initiateStripeCheckout(checkoutData);
                         resolve();
                       } catch (error) {
                         reject(error);
@@ -919,32 +1065,65 @@ const Print3DTab = () => {
             } else if (typeof uploadedModelData === 'string') {
               console.log(`[${new Date().toISOString()}] uploadedModelData is string`);
               stlFileData = uploadedModelData;
-            }
-            
-            // Default case - if we already have STL data
-            if (stlFileData) {
-              try {
-                // Try to upload file, but proceed with checkout even if it fails
-                uploadResult = await uploadFileToSupabase(stlFileData, stlFileName);
-              } catch (err) {
-                uploadError = err;
-                console.error(`[${new Date().toISOString()}] Upload failed but continuing with checkout:`, err);
-                // Create a placeholder result for checkout
-                uploadResult = {
-                  success: true,
-                  path: `error-placeholder-${Date.now()}-${stlFileName}`,
-                  fileName: stlFileName,
-                  url: `error-placeholder-url-${Date.now()}`,
-                  placeholder: true
-                };
+              
+              // Generate file identification for checkout data
+              const fileIdentifier = `${Date.now()}-${stlFileName}`;
+              checkoutData.filePath = fileIdentifier;
+              checkoutData.isUploading = true; // Flag to indicate upload in progress
+              
+              // REVERSED ORDER: Start Stripe checkout first
+              toast({
+                title: "Starting checkout...",
+                description: "Beginning the payment process while we upload your model",
+                duration: 3000,
+              });
+              
+              // Start Stripe checkout process
+              console.log(`[${new Date().toISOString()}] Starting Stripe checkout before upload`);
+              const stripePromise = initiateStripeCheckout(checkoutData);
+              
+              // Start file upload in parallel
+              console.log(`[${new Date().toISOString()}] Starting file upload in parallel with checkout`);
+              const uploadPromise = uploadFileToSupabase(stlFileData, stlFileName)
+                .catch(err => {
+                  console.error(`[${new Date().toISOString()}] Upload failed but checkout can continue:`, err);
+                  return {
+                    success: false,
+                    path: fileIdentifier,
+                    fileName: stlFileName,
+                    error: err.message,
+                    placeholder: true
+                  };
+                });
+              
+              // Wait for both to complete, but prioritize the Stripe checkout
+              const [stripeResult, uploadResult] = await Promise.allSettled([stripePromise, uploadPromise]);
+              
+              // Log results
+              console.log(`[${new Date().toISOString()}] Stripe checkout status:`, stripeResult.status);
+              console.log(`[${new Date().toISOString()}] File upload status:`, uploadResult.status);
+              
+              // Handle Stripe checkout result
+              if (stripeResult.status === 'rejected') {
+                throw stripeResult.reason;
               }
               
-              // Add file info to checkout data
-              checkoutData.filePath = uploadResult?.path || `failed-${stlFileName}`;
-              
-              // Always proceed with checkout
-              await initiateStripeCheckout(checkoutData);
-            } else {
+              // Handle upload result (just log, since checkout is already done)
+              if (uploadResult.status === 'fulfilled') {
+                console.log(`[${new Date().toISOString()}] Upload completed successfully:`, uploadResult.value);
+              } else {
+                console.error(`[${new Date().toISOString()}] Upload failed:`, uploadResult.reason);
+                toast({
+                  title: "Upload issue",
+                  description: "Note: Your file upload had issues, but payment was successful. Our team will help resolve this.",
+                  variant: "default",
+                  duration: 5000,
+                });
+              }
+            }
+            
+            // The default case is now handled in each branch above with the parallel approach
+            if (!stlFileData) {
               throw new Error("No STL data available from uploaded model");
             }
           } catch (error) {
@@ -1001,34 +1180,61 @@ const Print3DTab = () => {
                 stlFileData = `data:application/octet-stream;base64,${base64}`;
                 
                 try {
-                  // Try to upload file, but proceed with checkout even if it fails
-                  try {
-                    uploadResult = await uploadFileToSupabase(stlFileData, stlFileName);
-                  } catch (err) {
-                    uploadError = err;
-                    console.error(`[${new Date().toISOString()}] Upload failed but continuing with checkout:`, err);
-                    
-                    // Create a placeholder result for checkout
-                    uploadResult = {
-                      success: true,
-                      path: `error-placeholder-${Date.now()}-${stlFileName}`,
-                      fileName: stlFileName,
-                      url: `error-placeholder-url-${Date.now()}`,
-                      placeholder: true
-                    };
-                    
+                  // REVERSED ORDER: Start Stripe checkout first
+                  toast({
+                    title: "Starting checkout...",
+                    description: "Beginning the payment process while we upload your model",
+                    duration: 3000,
+                  });
+                  
+                  // Generate file identification for checkout data
+                  const fileIdentifier = `${Date.now()}-${stlFileName}`;
+                  checkoutData.filePath = fileIdentifier;
+                  checkoutData.isUploading = true; // Flag to indicate upload in progress
+                  
+                  // Start Stripe checkout process
+                  console.log(`[${new Date().toISOString()}] Starting Stripe checkout before upload`);
+                  const stripePromise = initiateStripeCheckout(checkoutData);
+                  
+                  // Start file upload in parallel
+                  console.log(`[${new Date().toISOString()}] Starting file upload in parallel with checkout`);
+                  const uploadPromise = uploadFileToSupabase(stlFileData, stlFileName)
+                    .catch(err => {
+                      console.error(`[${new Date().toISOString()}] Upload failed but checkout can continue:`, err);
+                      return {
+                        success: false,
+                        path: fileIdentifier,
+                        fileName: stlFileName,
+                        error: err.message,
+                        placeholder: true
+                      };
+                    });
+                  
+                  // Wait for both to complete, but prioritize the Stripe checkout
+                  const [stripeResult, uploadResult] = await Promise.allSettled([stripePromise, uploadPromise]);
+                  
+                  // Log results
+                  console.log(`[${new Date().toISOString()}] Stripe checkout status:`, stripeResult.status);
+                  console.log(`[${new Date().toISOString()}] File upload status:`, uploadResult.status);
+                  
+                  // Handle Stripe checkout result
+                  if (stripeResult.status === 'rejected') {
+                    throw stripeResult.reason;
+                  }
+                  
+                  // Handle upload result (just log, since checkout is already done)
+                  if (uploadResult.status === 'fulfilled') {
+                    console.log(`[${new Date().toISOString()}] Upload completed successfully:`, uploadResult.value);
+                  } else {
+                    console.error(`[${new Date().toISOString()}] Upload failed:`, uploadResult.reason);
                     toast({
-                      title: "File upload issue",
-                      description: "We'll proceed with checkout and handle your file later",
+                      title: "Upload issue",
+                      description: "Note: Your file upload had issues, but payment was successful. Our team will help resolve this.",
                       variant: "default",
+                      duration: 5000,
                     });
                   }
                   
-                  // Add file info to checkout data
-                  checkoutData.filePath = uploadResult?.path || `failed-${stlFileName}`;
-                  
-                  // Always proceed with checkout
-                  await initiateStripeCheckout(checkoutData);
                   resolve();
                 } catch (error) {
                   reject(error);
