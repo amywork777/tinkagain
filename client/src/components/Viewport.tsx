@@ -57,43 +57,55 @@ export function Viewport() {
     
     // Enforce grid and axes visibility on every frame
     function enforceHelperVisibility(scene: THREE.Scene) {
-      // Get the current state directly for critical values
-      const currentShowGrid = useScene.getState().showGrid;
-      const currentShowAxes = useScene.getState().showAxes;
+      // Get the current state directly for critical values - ALWAYS get fresh state
+      const useSceneState = useScene.getState();
+      const currentShowGrid = useSceneState.showGrid;
+      const currentShowAxes = useSceneState.showAxes;
       
       // Log visibility state for debugging
-      console.log(`Enforcing helper visibility - Grid: ${currentShowGrid}, Axes: ${currentShowAxes}`);
+      // console.log(`Enforcing helper visibility - Grid: ${currentShowGrid}, Axes: ${currentShowAxes}`);
       
+      // ULTRA-RELIABLE GRID IMPLEMENTATION
       // GRID HELPER - Find or create
-      let gridHelper = scene.children.find(child => child.name === 'gridHelper');
+      let gridHelper: THREE.Object3D | undefined = scene.children.find(child => child.name === 'gridHelper');
+      
+      // If not found, create it with proper visibility
       if (!gridHelper) {
         console.log('Creating missing grid helper during render');
         gridHelper = new THREE.GridHelper(500, 100);
         gridHelper.name = 'gridHelper';
         gridHelper.position.y = -25;
+        gridHelper.visible = currentShowGrid; // Set initial visibility correctly
         scene.add(gridHelper);
+      } else {
+        // Always enforce current state if existing
+        if (gridHelper.visible !== currentShowGrid) {
+          console.log(`Correcting grid visibility from ${gridHelper.visible} to ${currentShowGrid}`);
+          gridHelper.visible = currentShowGrid;
+        }
       }
       
-      // Always enforce current state
-      if (gridHelper.visible !== currentShowGrid) {
-        console.log(`Correcting grid visibility from ${gridHelper.visible} to ${currentShowGrid}`);
-        gridHelper.visible = currentShowGrid;
-      }
-      
+      // ULTRA-RELIABLE AXES IMPLEMENTATION
       // AXES HELPER - Find or create
-      let axesHelper = scene.children.find(child => child.name === 'axesHelper');
+      let axesHelper: THREE.Object3D | undefined = scene.children.find(child => child.name === 'axesHelper');
+      
+      // If not found, create it with proper visibility
       if (!axesHelper) {
         console.log('Creating missing axes helper during render');
         axesHelper = new THREE.AxesHelper(250);
         axesHelper.name = 'axesHelper';
+        axesHelper.visible = currentShowAxes; // Set initial visibility correctly
         scene.add(axesHelper);
+      } else {
+        // Always enforce current state if existing
+        if (axesHelper.visible !== currentShowAxes) {
+          console.log(`Correcting axes visibility from ${axesHelper.visible} to ${currentShowAxes}`);
+          axesHelper.visible = currentShowAxes;
+        }
       }
       
-      // Always enforce current state
-      if (axesHelper.visible !== currentShowAxes) {
-        console.log(`Correcting axes visibility from ${axesHelper.visible} to ${currentShowAxes}`);
-        axesHelper.visible = currentShowAxes;
-      }
+      // Set a special flag to force re-render if needed
+      scene.userData.visibilityUpdated = Date.now();
     }
     
     // Process boolean operations before rendering
