@@ -10,7 +10,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
 import { initFishCadMessageListener } from "@/lib/iframeInterceptor";
 import MobileWarning from "@/components/MobileWarning";
-import MobileView from "@/components/MobileView";
+import FreeMobileView from "@/components/FreeMobileView";
 import { useAuth } from "@/context/AuthContext";
 import { useSubscription } from "@/context/SubscriptionContext";
 import { FeedbackDialog } from "@/components/FeedbackDialog";
@@ -148,9 +148,9 @@ export default function FreePage() {
     setUseMobileVersion(true);
   };
 
-  // If mobile version is active, render the simplified mobile view
+  // If mobile version is active, render the free version mobile view with pro-mode popup
   if (useMobileVersion) {
-    return <MobileView />;
+    return <FreeMobileView />;
   }
   
   // Otherwise render the full desktop version
