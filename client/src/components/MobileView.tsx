@@ -112,6 +112,5 @@ const MobileView: React.FC = () => {
     </div>
   );
 }
-};
 
 export default MobileView; // Added a comment
